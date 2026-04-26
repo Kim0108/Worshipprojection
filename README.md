@@ -24,8 +24,8 @@
 WorshipProjection/
 │
 ├── Views (使用者介面)
-│   ├── ContentView.swift           # 主畫面入口 (內含 Sidebar, ResourceLibrary, LiveControlBoard 等模組)
-│   ├── LiveDisplayView.swift       # 投影輸出與 16:9 預覽畫面核心，負責疊加背景與文字轉場
+│   ├── ContentView.swift           # 主畫面入口 (內含 Sidebar, ResourceLibrary, LiveControlBoard 等模組)(還沒整理，很亂)                 
+│   ├── LiveDisplayView.swift       # 投影輸出與 16:9 預覽畫面，負責疊加背景與文字轉場
 │   ├── SongEditorView.swift        # 歌詞編輯器、排版設定與即時解析預覽
 │   └── BackgroundPlayerView.swift  # 封裝 AVPlayer 的底層無縫循環播放器
 │
@@ -34,8 +34,7 @@ WorshipProjection/
 │   └── ExternalDisplayManager.swift# 螢幕監聽器：負責偵測 AirPlay/HDMI 並建立獨立 UIWindow
 │
 ├── Models & Utils (資料與工具)
-│   ├── Models.swift                # 定義 Song, BackgroundItem, TextSettings 等核心資料結構
-│   └── Utils.swift                 # 共用工具 (如 VideoPickerTransferable 影片沙盒匯入協定)
+│   └── Models.swift                # 定義 Song, BackgroundItem, TextSettings 等核心資料結構
 │
 └── App & Configurations (系統配置)
     ├── WorshipprojectionApp.swift  # App 進入點，負責初始化全域唯一的 Managers
