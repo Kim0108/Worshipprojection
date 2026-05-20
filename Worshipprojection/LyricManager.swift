@@ -138,10 +138,11 @@ class LyricManager: ObservableObject {
     }
 
     private func sendActiveState() {
-        guard appRole == .broadcaster || multipeerManager.connectionRole == .broadcaster else { return }
         let state = LiveSyncState(lyric: activeLyricContent, style: activeStyle)
-        multipeerManager.send(state: state)
         webServer.publish(state)
+
+        guard appRole == .broadcaster || multipeerManager.connectionRole == .broadcaster else { return }
+        multipeerManager.send(state: state)
     }
 
     private func receive(_ data: Data) {
