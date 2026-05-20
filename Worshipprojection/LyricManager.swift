@@ -8,7 +8,12 @@ class LyricManager: ObservableObject {
     private var isReceivingFromNetwork = false
     @Published var appRole: AppRole?
     @Published var projectionMode: ProjectionMode = .lyricsWithBackground
-
+    
+// 💡 新增：儲存與內存的顯示字串
+    @Published var storageUsageString: String = "計算中..."
+    @Published var memoryUsageString: String = "計算中..."
+    private var memoryTimer: AnyCancellable? // 用來定時刷新內存
+    
     // --- 1. 資料庫：歌詞與背景 ---
     @Published var allSongs: [Song] = [] {
         didSet { saveSongs() }
@@ -100,6 +105,9 @@ class LyricManager: ObservableObject {
         loadBackgrounds()
         loadSlides()
         loadSetlist() // 載入今日流程
+        updateStorageUsage() // 💡 啟動時先算一次容量
+        startMemoryMonitoring()
+        clearTempDirectory()// 💡 加上這行：一打開 App 就把沒用的暫存全砍了
         // 在 LyricManager 的 init() 裡面：
         multipeerManager.onReceivedData = { [weak self] data in
             self?.receive(data)
@@ -159,7 +167,111 @@ class LyricManager: ObservableObject {
             activeLyricContent = receivedText
         }
     }
+// MARK: - 🗑️ 修正版：實體物理刪除背景
+    // 💡 同時刪除硬碟實體檔案、清空記憶體播放器、並從對應的資料夾陣列中移除
+    func deleteBackground(_ item: BackgroundItem, from folderID: UUID) {
+        // 1. 物理刪除硬碟檔案（避免 App 越來越大）
+        let fileURL = item.fileURL
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                print("🗑️ 成功從硬碟徹底刪除檔案：\(item.fileName)")
+            } catch {
+                print("❌ 物理刪除檔案失敗：\(error.localizedDescription)")
+            }
+        }
+        
+        // 2. 如果刪除的是當前畫面上正在播的背景，立刻清空它，釋放記憶體
+        if selectedBackground?.id == item.id {
+            selectedBackground = nil
+        }
+        if previousBackground?.id == item.id {
+            previousBackground = nil
+        }
+        
+        // 3. 從正確的資料夾中將它移除，並觸發 didSet 存檔
+        if let folderIndex = backgroundFolders.firstIndex(where: { $0.id == folderID }) {
+            backgroundFolders[folderIndex].backgrounds.removeAll(where: { $0.id == item.id })
+            // 重新賦值以觸發 @Published 的 didSet 存檔機制
+            backgroundFolders = backgroundFolders
+        }
+        
+        // 4. 刪除完畢，立刻重新計算硬碟大小
+        updateStorageUsage()
+        clearTempDirectory()
+    }
 
+    // MARK: - 📊 效能與內存監測工具
+    
+    /// 核心功能：計算沙盒 Documents 資料夾的總大小
+    func updateStorageUsage() {
+        let fileManager = FileManager.default
+        do {
+            let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: [.fileSizeKey], options: [])
+            var totalSize: Int64 = 0
+            for fileURL in fileURLs {
+                let resourceValues = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+                if let fileSize = resourceValues.fileSize {
+                    totalSize += Int64(fileSize)
+                }
+            }
+            let formatter = ByteCountFormatter()
+            formatter.allowedUnits = [.useMB, .useGB]
+            formatter.countStyle = .file
+            
+            DispatchQueue.main.async {
+                self.storageUsageString = formatter.string(fromByteCount: totalSize)
+            }
+        } catch {
+            print("❌ 計算硬碟空間失敗: \(error)")
+        }
+    }
+    
+    /// 核心功能：每 2 秒抓取一次 iOS 系統分配給此 App 的真實執行內存 (RAM)
+    private func startMemoryMonitoring() {
+        memoryTimer = Timer.publish(every: 2.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.updateMemoryUsage()
+            }
+    }
+    
+    private func updateMemoryUsage() {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
+        
+        let kerr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        
+        if kerr == KERN_SUCCESS {
+            let usedBytes = Double(info.resident_size)
+            let usedMB = usedBytes / 1024.0 / 1024.0
+            DispatchQueue.main.async {
+                self.memoryUsageString = String(format: "%.1f MB", usedMB)
+            }
+        }
+    }
+    // 💡 3. 刪除「整個背景資料夾」時，一併刪除裡面的所有檔案
+    func deleteBackgroundFolder(at offsets: IndexSet) {
+        for index in offsets {
+            let folder = backgroundFolders[index]
+            // 迴圈把該資料夾內的所有背景檔案通通物理刪除
+            for bg in folder.backgrounds {
+                let fileURL = documentsDirectory.appendingPathComponent(bg.fileName)
+                try? FileManager.default.removeItem(at: fileURL)
+                print("🗑️ 已跟隨資料夾刪除檔案：\(bg.fileName)")
+            }
+        }
+        
+        // 從陣列中移除資料夾
+        backgroundFolders.remove(atOffsets: offsets)
+        
+        // 重新計算容量
+        updateStorageUsage()
+    }
     // MARK: - ⭐️ 今日流程管理邏輯
     func addToSetlist(_ song: Song) {
         synchronizeSongsBetweenLists()
@@ -383,10 +495,13 @@ class LyricManager: ObservableObject {
                 )
                 self.backgroundFolders[folderIndex].backgrounds.append(newBG)
                 self.selectedBackground = newBG
+                self.updateStorageUsage()
+                self.clearTempDirectory() // 💡 匯入完成後，立刻把 tmp 裡的過渡檔案刪除！
             }
         } catch {
             print("❌ 匯入失敗: \(error.localizedDescription)")
         }
+        
     }
     
     func deleteBackground(at offsets: IndexSet) {
@@ -430,8 +545,25 @@ class LyricManager: ObservableObject {
         previousBackground = nil
         backgroundFolders.removeAll()
         activeBackgroundFolderID = nil
+        updateStorageUsage()
+        updateMemoryUsage()
     }
-
+/// 💡 供 UI 按鈕直接呼叫的「一鍵清除與同步刷新」
+    func triggerAppSlimming() {
+        // 1. 執行物理刪除暫存垃圾
+        clearTempDirectory()
+        
+        // 2. 強制系統做一次記憶體垃圾回收（有助於降低 RAM 數字）
+        // iOS 沒有手動 GC，但我們可以透過清空沒用到的緩存間接釋放
+        if selectedBackground == nil {
+            // 如果當前沒播背景，通知系統釋放一些記憶體
+            URLCache.shared.removeAllCachedResponses()
+        }
+        
+        // 3. ⭐️ 關鍵：不等定時器，點擊的「當下」立刻強制計算最新數據
+        updateStorageUsage()
+        updateMemoryUsage()
+    }
     // MARK: - 投影片管理
 
     var activeSlideFolder: SlideFolder? {
@@ -787,6 +919,19 @@ class LyricManager: ObservableObject {
         if let legacySlides = try? JSONDecoder().decode([SlideItem].self, from: data) {
             slideFolders = [SlideFolder(name: "預設簡報", slides: legacySlides)]
             activeSlideFolderID = slideFolders.first?.id
+        }
+    }
+// MARK: - 🧹 系統深度清理 (清除幽靈暫存檔)
+    func clearTempDirectory() {
+        let tempDirectory = FileManager.default.temporaryDirectory
+        do {
+            let tempFiles = try FileManager.default.contentsOfDirectory(at: tempDirectory, includingPropertiesForKeys: nil, options: [])
+            for file in tempFiles {
+                try FileManager.default.removeItem(at: file)
+                print("🧹 成功清除殘留暫存檔：\(file.lastPathComponent)")
+            }
+        } catch {
+            print("❌ 清除暫存檔失敗：\(error)")
         }
     }
 }
