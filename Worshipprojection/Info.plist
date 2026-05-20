@@ -2,15 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSLocationUsageDescription</key>
-	<string></string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_worship-sync._tcp</string>
-	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+    
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>我們需要使用區域網路來同步 iPad 與 iPhone 的舞台提詞機畫面。</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_worship-sync._tcp</string>
+        <string>_worship-sync._udp</string>
+    </array>
 </dict>
 </plist>

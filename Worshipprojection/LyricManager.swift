@@ -4,6 +4,8 @@ import PhotosUI
 internal import UniformTypeIdentifiers
 
 class LyricManager: ObservableObject {
+    private var isReceivingFromNetwork = false
+
     // --- 1. 資料庫：歌詞與背景 ---
     @Published var allSongs: [Song] = [] {
         didSet { saveSongs() }
@@ -20,20 +22,6 @@ class LyricManager: ObservableObject {
     enum SidebarCategory { case all, today }
     @Published var currentCategory: SidebarCategory = .today // 預設看今日流程
     @Published var selectedSong: Song? // 單純紀錄選中的歌供 UI 預備，不觸發 Live 畫面
-// 很爛刪掉
-//    // --- 2. Live 狀態控制 ---
-//    @Published var selectedSong: Song? {
-//        didSet {
-//            // ⭐️ 當點選歌曲時，自動載入該歌曲記憶的樣式設定
-//            if let song = selectedSong {
-//                activeStyle = song.style
-//                // 預設切換到第一段歌詞內容
-//                if let first = song.segments.first {
-//                    activeLyricContent = first.content
-//                }
-//            }
-//        }
-//    }
     
     @Published var activeStyle: TextSettings = TextSettings() // 正在投影的樣式
     // ⭐️ 1. 新增：建立同步管理器
@@ -42,8 +30,11 @@ class LyricManager: ObservableObject {
     // ⭐️ 2. 修改：當文字改變時，自動發送給台上的設備
     @Published var activeLyricContent: String = "" {
         didSet {
-            multipeerManager.send(lyric: activeLyricContent)
-        }
+                // 傳送限制：只有在「不是」從網路接收資料時（代表是自己手動點擊歌詞），才廣播給對方
+                if !isReceivingFromNetwork {
+                    multipeerManager.send(lyric: activeLyricContent)
+                }
+            }
     }
     
     @Published var previousBackground: BackgroundItem? = nil
@@ -71,11 +62,28 @@ class LyricManager: ObservableObject {
     private var documentsDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
-
+// 💡 在變數宣告區，加上這行（用來儲存訂閱狀態）
+    private var cancellables = Set<AnyCancellable>()
     init() {
         loadSongs()
         loadBackgrounds()
         loadSetlist() // 載入今日流程
+        // 在 LyricManager 的 init() 裡面：
+        multipeerManager.onReceivedData = { [weak self] data in
+            if let receivedText = String(data: data, encoding: .utf8) {
+                self?.isReceivingFromNetwork = true // 1. 收到對方傳來的歌詞時，先把鎖打開
+                self?.activeLyricContent = receivedText // 2. 更新畫面文字（這會觸發上面的 didSet，但因為鎖開著，所以不會再回傳給對方）
+                self?.isReceivingFromNetwork = false // 3. 畫面更新完畢，把鎖關上，恢復成可以手動點擊傳送的狀態
+            }
+        }
+// 轉發機制：
+        multipeerManager.objectWillChange
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.objectWillChange.send() // 當內層變動，觸發外層刷新
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - ⭐️ 今日流程管理邏輯

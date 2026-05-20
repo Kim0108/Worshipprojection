@@ -3,16 +3,20 @@ import MultipeerConnectivity
 internal import Combine
 
 class MultipeerManager: NSObject, ObservableObject {
-    private let serviceType = "worship-sync" // 必須與 Info.plist 中的名稱一致
+    // ⚠️ 務必確保你的 Info.plist 裡面的 Bonjour 服務名稱是 _worship-sync._tcp 和 _worship-sync._udp
+    private let serviceType = "worship-sync"
     private let myPeerId = MCPeerID(displayName: UIDevice.current.name)
-    private var session: MCSession!
+    
+    // 為了雙向連線，我們同時宣告廣播與搜尋器
     private var advertiser: MCNearbyServiceAdvertiser?
     private var browser: MCNearbyServiceBrowser?
-
+    
+    @Published var session: MCSession!
+    @Published var isActive = false // 💡 統整成一個開關狀態，給 UI 按鈕使用
     @Published var connectedPeers: [MCPeerID] = []
-    @Published var receivedLyric: String = ""
-    @Published var isHosting: Bool = false
-    @Published var isBrowsing: Bool = false
+    
+    // 收到資料時的回呼函式 (讓 LyricManager 接收處理防回音鎖)
+    var onReceivedData: ((Data) -> Void)?
 
     override init() {
         super.init()
@@ -20,35 +24,46 @@ class MultipeerManager: NSObject, ObservableObject {
         session.delegate = self
     }
 
-    // 主控端：開始廣播自己
-    func startHosting() {
+    // MARK: - 連線控制 (雙向連線)
+    
+    // 💡 取代原本的 startHosting 與 startBrowsing
+    func startConnection() {
+        stopAll()
+        
+        isActive = true // 更新按鈕為開啟狀態
+        
+        // 1. 同時開啟廣播 (讓別人能找到我)
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerId, discoveryInfo: nil, serviceType: serviceType)
         advertiser?.delegate = self
         advertiser?.startAdvertisingPeer()
-        isHosting = true
-        isBrowsing = false
-    }
-
-    // 接收端：開始尋找主控端
-    func startBrowsing() {
+        
+        // 2. 同時開啟搜尋 (主動去尋找別人)
         browser = MCNearbyServiceBrowser(peer: myPeerId, serviceType: serviceType)
         browser?.delegate = self
         browser?.startBrowsingForPeers()
-        isBrowsing = true
-        isHosting = false
+        
+        print("🔄 雙向連線啟動：同時廣播與搜尋中...")
     }
     
     // 停止連線
     func stopAll() {
+        isActive = false // 更新按鈕為關閉狀態
+        
         advertiser?.stopAdvertisingPeer()
+        advertiser = nil
+        
         browser?.stopBrowsingForPeers()
+        browser = nil
+        
         session.disconnect()
-        isHosting = false
-        isBrowsing = false
-        connectedPeers.removeAll()
+        
+        DispatchQueue.main.async {
+            self.connectedPeers.removeAll()
+        }
+        print("🛑 已停止所有連線服務")
     }
 
-    // 主控端：發送歌詞給所有連線的接收端
+    // 發送歌詞給所有連線的設備
     func send(lyric: String) {
         guard !session.connectedPeers.isEmpty else { return }
         if let data = lyric.data(using: .utf8) {
@@ -66,10 +81,9 @@ extension MultipeerManager: MCSessionDelegate {
     }
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        if let text = String(data: data, encoding: .utf8) {
-            DispatchQueue.main.async {
-                self.receivedLyric = text // 接收端收到歌詞並更新畫面
-            }
+        // 將收到的資料傳出去，交給 LyricManager 處理 (避免畫面與網路無限迴圈)
+        DispatchQueue.main.async {
+            self.onReceivedData?(data)
         }
     }
     
@@ -80,15 +94,17 @@ extension MultipeerManager: MCSessionDelegate {
 
 // MARK: - Advertiser & Browser Delegate (處理自動配對)
 extension MultipeerManager: MCNearbyServiceAdvertiserDelegate {
-    // 主控端收到連線請求：無條件自動接受
+    // 收到連線請求：無條件自動接受
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
+        print("🤝 收到來自 \(peerID.displayName) 的連線請求，已自動允許。")
         invitationHandler(true, session)
     }
 }
 
 extension MultipeerManager: MCNearbyServiceBrowserDelegate {
-    // 接收端找到主控端：自動發出連線邀請
+    // 找到目標：自動發出連線邀請
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
+        print("✨ 找到目標連線: \(peerID.displayName)，正在送出自動邀請...")
         browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
     }
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {}

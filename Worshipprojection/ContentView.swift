@@ -75,6 +75,30 @@ extension ContentView {
                     sidebarIconButton(title: "所有歌曲", icon: "music.note.list", type: .all)
                     sidebarIconButton(title: "今日流程", icon: "star.fill", type: .today)
                     
+                    Spacer()
+                    
+                // 👇 ======= 新增這顆連線開關按鈕 ======= 👇
+                    Button {
+                        // 點擊時，根據目前狀態決定要開啟還是關閉
+                        if manager.multipeerManager.isActive {
+                            manager.multipeerManager.stopAll()
+                        } else {
+                            manager.multipeerManager.startConnection()
+                        }
+                    } label: {
+                        VStack(spacing: 6) {
+                            // 用三元運算子讓開啟時變成綠色實心，關閉時為灰色空心
+                            Image(systemName: manager.multipeerManager.isActive ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right.slash")
+                                .font(.system(size: 24))
+                                .foregroundColor(manager.multipeerManager.isActive ? .green : .gray)
+                            
+                            Text(manager.multipeerManager.isActive ? "中斷連線" : "開啟連線")
+                                .font(.caption)
+                                .foregroundColor(manager.multipeerManager.isActive ? .green : .gray)
+                        }
+                    }
+                    // 👆 =================================== 👆
+                    
                     Button { showingSongEditor = true } label: {
                         VStack(spacing: 8) {
                             Image(systemName: "plus.circle.fill").font(.title2)
@@ -174,9 +198,9 @@ extension ContentView {
                     Spacer()
                     // ⭐️ 主控端廣播開關
                     Toggle("廣播同步", isOn: Binding(
-                        get: { manager.multipeerManager.isHosting },
-                        set: { isHosting in
-                            if isHosting { manager.multipeerManager.startHosting() }
+                        get: { manager.multipeerManager.isActive },
+                        set: { isActive in
+                            if isActive { manager.multipeerManager.startConnection() }
                             else { manager.multipeerManager.stopAll() }
                         }
                     ))
@@ -387,13 +411,13 @@ extension ContentView {
         List {
             Section("主控台廣播設定") {
                 Toggle("開啟廣播同步", isOn: Binding(
-                    get: { manager.multipeerManager.isHosting },
-                    set: { isHosting in
-                        if isHosting { manager.multipeerManager.startHosting() }
+                    get: { manager.multipeerManager.isActive },
+                    set: { isActive in
+                        if isActive { manager.multipeerManager.startConnection() }
                         else { manager.multipeerManager.stopAll() }
                     }
                 ))
-                if manager.multipeerManager.isHosting {
+                if manager.multipeerManager.isActive {
                     Text("已連線設備：\(manager.multipeerManager.connectedPeers.count) 台")
                         .foregroundColor(.green)
                 }
