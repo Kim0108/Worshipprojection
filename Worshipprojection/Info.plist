@@ -13,6 +13,44 @@
     <array>
         <string>_worship-sync._tcp</string>
         <string>_worship-sync._udp</string>
+        <string>_worship-web._tcp</string>
+    </array>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.worshipprojection.package</string>
+            <key>UTTypeDescription</key>
+            <string>Worship Projection Package</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>worshippkg</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/vnd.worshipprojection.package+json</string>
+            </dict>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Worship Projection Package</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.worshipprojection.package</string>
+            </array>
+        </dict>
     </array>
 </dict>
 </plist>

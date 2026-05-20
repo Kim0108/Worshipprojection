@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UIKit
 internal import Combine
 
 struct BackgroundPlayerView: View {
@@ -24,7 +25,7 @@ struct BackgroundPlayerView: View {
                             .onAppear {
                                 playerManager.setupPlayer(url: bgItem.fileURL)
                             }
-                            .onChange(of: bgItem) { newItem in
+                            .onChange(of: bgItem) { _, newItem in
                                 playerManager.setupPlayer(url: newItem.fileURL)
                             }
                     } else {

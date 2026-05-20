@@ -1,5 +1,6 @@
 import Foundation
 import MultipeerConnectivity
+import UIKit
 internal import Combine
 
 class MultipeerManager: NSObject, ObservableObject {
@@ -14,6 +15,14 @@ class MultipeerManager: NSObject, ObservableObject {
     @Published var session: MCSession!
     @Published var isActive = false // 💡 統整成一個開關狀態，給 UI 按鈕使用
     @Published var connectedPeers: [MCPeerID] = []
+    @Published var connectionRole: ConnectionRole = .idle
+
+    enum ConnectionRole {
+        case idle
+        case broadcaster
+        case receiver
+        case bidirectional
+    }
     
     // 收到資料時的回呼函式 (讓 LyricManager 接收處理防回音鎖)
     var onReceivedData: ((Data) -> Void)?
@@ -27,22 +36,25 @@ class MultipeerManager: NSObject, ObservableObject {
     // MARK: - 連線控制 (雙向連線)
     
     // 💡 取代原本的 startHosting 與 startBrowsing
-    func startConnection() {
+    func startConnection(role: ConnectionRole = .bidirectional) {
         stopAll()
         
         isActive = true // 更新按鈕為開啟狀態
+        connectionRole = role
         
-        // 1. 同時開啟廣播 (讓別人能找到我)
-        advertiser = MCNearbyServiceAdvertiser(peer: myPeerId, discoveryInfo: nil, serviceType: serviceType)
-        advertiser?.delegate = self
-        advertiser?.startAdvertisingPeer()
+        if role == .broadcaster || role == .bidirectional {
+            advertiser = MCNearbyServiceAdvertiser(peer: myPeerId, discoveryInfo: ["role": "broadcaster"], serviceType: serviceType)
+            advertiser?.delegate = self
+            advertiser?.startAdvertisingPeer()
+        }
         
-        // 2. 同時開啟搜尋 (主動去尋找別人)
-        browser = MCNearbyServiceBrowser(peer: myPeerId, serviceType: serviceType)
-        browser?.delegate = self
-        browser?.startBrowsingForPeers()
+        if role == .receiver || role == .bidirectional {
+            browser = MCNearbyServiceBrowser(peer: myPeerId, serviceType: serviceType)
+            browser?.delegate = self
+            browser?.startBrowsingForPeers()
+        }
         
-        print("🔄 雙向連線啟動：同時廣播與搜尋中...")
+        print("🔄 連線啟動：\(role)")
     }
     
     // 停止連線
@@ -56,6 +68,7 @@ class MultipeerManager: NSObject, ObservableObject {
         browser = nil
         
         session.disconnect()
+        connectionRole = .idle
         
         DispatchQueue.main.async {
             self.connectedPeers.removeAll()
@@ -69,6 +82,12 @@ class MultipeerManager: NSObject, ObservableObject {
         if let data = lyric.data(using: .utf8) {
             try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
         }
+    }
+
+    func send(state: LiveSyncState) {
+        guard !session.connectedPeers.isEmpty else { return }
+        guard let data = try? JSONEncoder().encode(state) else { return }
+        try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
     }
 }
 

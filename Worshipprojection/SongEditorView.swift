@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SongEditorView: View {
     @ObservedObject var manager: LyricManager
@@ -12,6 +13,11 @@ struct SongEditorView: View {
     // 保持使用 Double 適配 TextField
     @State private var fontSize: Double = 80
     @State private var lineSpacing: Double = 20
+    @State private var shadowRadius: Double = 10
+    @State private var verticalPosition: Double = 0.5
+    @State private var horizontalPaddingRatio: Double = 0.05
+    @State private var backgroundDimOpacity: Double = 0.0
+    @State private var horizontalAlignment: TextHorizontalAlignment = .center
     @State private var textColor: Color = .white
     
     // ⭐️ 核心新增：即時解析第一個段落的計算屬性
@@ -62,21 +68,22 @@ struct SongEditorView: View {
                     GeometryReader { geo in
                         let calcFontSize = geo.size.height * (CGFloat(fontSize) / 1000.0)
                         let calcLineSpacing = geo.size.height * (CGFloat(lineSpacing) / 1000.0)
-                        let paddingX = geo.size.width * 0.05
+                        let paddingX = geo.size.width * CGFloat(horizontalPaddingRatio)
                         
                         VStack(alignment: .center) {
                             // ⭐️ 修正：這裡改用剛剛寫好的 previewText
                             Text(previewText)
                                 .font(.system(size: calcFontSize, weight: .bold))
                                 .foregroundColor(textColor)
-                                .multilineTextAlignment(.center)
+                                .multilineTextAlignment(horizontalAlignment.textAlignment)
                                 .lineSpacing(calcLineSpacing)
                                 .padding(.horizontal, paddingX)
-                                .shadow(color: .black.opacity(0.8), radius: 10, x: 2, y: 2)
-                                .frame(maxWidth: .infinity, alignment: .center)
+                                .shadow(color: .black.opacity(0.8), radius: shadowRadius, x: 2, y: 2)
+                                .frame(maxWidth: .infinity, alignment: horizontalAlignment.frameAlignment)
                         }
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
                         .background(Color.black.opacity(0.9))
+                        .offset(y: geo.size.height * CGFloat(verticalPosition - 0.5))
                     }
                     .aspectRatio(16/9, contentMode: .fit)
                     .cornerRadius(8)
@@ -103,6 +110,45 @@ struct SongEditorView: View {
                     }
                     
                     ColorPicker("文字顏色", selection: $textColor)
+
+                    Picker("文字對齊", selection: $horizontalAlignment) {
+                        ForEach(TextHorizontalAlignment.allCases) { alignment in
+                            Text(alignment.title).tag(alignment)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    HStack {
+                        Text("垂直位置")
+                        Slider(value: $verticalPosition, in: 0.15...0.85, step: 0.01)
+                        Text("\(Int(verticalPosition * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 44, alignment: .trailing)
+                    }
+
+                    HStack {
+                        Text("左右留白")
+                        Slider(value: $horizontalPaddingRatio, in: 0.02...0.2, step: 0.01)
+                        Text("\(Int(horizontalPaddingRatio * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 44, alignment: .trailing)
+                    }
+
+                    HStack {
+                        Text("陰影強度")
+                        Slider(value: $shadowRadius, in: 0...30, step: 1)
+                        Text("\(Int(shadowRadius))")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 44, alignment: .trailing)
+                    }
+
+                    HStack {
+                        Text("背景壓暗")
+                        Slider(value: $backgroundDimOpacity, in: 0...0.75, step: 0.05)
+                        Text("\(Int(backgroundDimOpacity * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 44, alignment: .trailing)
+                    }
                 }
             }
             .navigationTitle(editingSong == nil ? "新增歌曲" : "編輯歌詞")
@@ -131,6 +177,11 @@ struct SongEditorView: View {
             
             fontSize = Double(song.style.fontSize)
             lineSpacing = Double(song.style.lineSpacing)
+            shadowRadius = Double(song.style.shadowRadius)
+            verticalPosition = Double(song.style.verticalPosition)
+            horizontalPaddingRatio = Double(song.style.horizontalPaddingRatio)
+            backgroundDimOpacity = song.style.backgroundDimOpacity
+            horizontalAlignment = song.style.horizontalAlignment
             
             let data = song.style.textColor
             textColor = Color(red: data.r, green: data.g, blue: data.b)
@@ -144,31 +195,34 @@ struct SongEditorView: View {
         let r = Double(components.indices.contains(0) ? components[0] : 1.0)
         let g = Double(components.indices.contains(1) ? components[1] : 1.0)
         let b = Double(components.indices.contains(2) ? components[2] : 1.0)
-        
+
         let newColorData = ColorData(r: r, g: g, b: b)
-        
+
         if let song = editingSong {
-            if let index = manager.allSongs.firstIndex(where: { $0.id == song.id }) {
-                var updated = manager.allSongs[index]
-                updated.title = title
-                updated.rawText = rawText
-                
-                updated.style.fontSize = CGFloat(fontSize)
-                updated.style.lineSpacing = CGFloat(lineSpacing)
-                updated.style.textColor = newColorData
-                
-                updated.parseSegments()
-                manager.allSongs[index] = updated
-                
-                if manager.selectedSong?.id == updated.id {
-                    manager.selectedSong = updated
-                }
-            }
+            var updated = manager.canonicalSong(for: song)
+            updated.title = title
+            updated.rawText = rawText
+
+            updated.style.fontSize = CGFloat(fontSize)
+            updated.style.lineSpacing = CGFloat(lineSpacing)
+            updated.style.shadowRadius = CGFloat(shadowRadius)
+            updated.style.verticalPosition = CGFloat(verticalPosition)
+            updated.style.horizontalPaddingRatio = CGFloat(horizontalPaddingRatio)
+            updated.style.backgroundDimOpacity = backgroundDimOpacity
+            updated.style.horizontalAlignment = horizontalAlignment
+            updated.style.textColor = newColorData
+
+            manager.updateSong(updated)
         } else {
             manager.addSong(title: title,
                             text: rawText,
                             fontSize: CGFloat(fontSize),
                             lineSpacing: CGFloat(lineSpacing),
+                            shadowRadius: CGFloat(shadowRadius),
+                            verticalPosition: CGFloat(verticalPosition),
+                            horizontalPaddingRatio: CGFloat(horizontalPaddingRatio),
+                            backgroundDimOpacity: backgroundDimOpacity,
+                            horizontalAlignment: horizontalAlignment,
                             textColor: textColor)
         }
         dismiss()

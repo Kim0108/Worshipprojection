@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 internal import UniformTypeIdentifiers
 
 @main
@@ -15,8 +16,102 @@ struct WorshipProjectionApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RoleGateView()
                 .environmentObject(lyricManager)
+        }
+    }
+}
+
+struct RoleGateView: View {
+    @EnvironmentObject var manager: LyricManager
+    @State private var selectedMode: ProjectionMode?
+
+    var body: some View {
+        Group {
+            if selectedMode == .lyricsWithBackground {
+                ContentView(switchMode: { switchProjectionMode(to: $0) })
+                    .onAppear {
+                        manager.projectionMode = .lyricsWithBackground
+                        manager.setRole(.broadcaster)
+                    }
+            } else if selectedMode == .slides {
+                SlideModeView(switchMode: { switchProjectionMode(to: $0) })
+                    .onAppear {
+                        manager.projectionMode = .slides
+                        manager.setRole(.broadcaster)
+                    }
+            } else {
+                ModeSelectionView { mode in
+                    selectedMode = mode
+                }
+            }
+        }
+    }
+
+    private func switchProjectionMode(to mode: ProjectionMode) {
+        manager.projectionMode = mode
+        if mode == .slides {
+            manager.isSlideBlackout = false
+        }
+        selectedMode = mode
+    }
+}
+
+struct ModeSelectionView: View {
+    var onSelect: (ProjectionMode) -> Void
+
+    var body: some View {
+        ZStack {
+            Color(UIColor.systemBackground).ignoresSafeArea()
+            VStack(spacing: 28) {
+                VStack(spacing: 8) {
+                    Text("選擇使用模式")
+                        .font(.largeTitle.weight(.bold))
+                    Text("歌詞投放與簡報投放分開操作，畫面與流程互不干擾。")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                ViewThatFits {
+                    roleButtons(axis: .horizontal)
+                    roleButtons(axis: .vertical)
+                }
+                .frame(maxWidth: 760)
+            }
+            .padding(32)
+        }
+    }
+
+    @ViewBuilder
+    private func roleButtons(axis: Axis) -> some View {
+        let layout = axis == .horizontal ? AnyLayout(HStackLayout(spacing: 18)) : AnyLayout(VStackLayout(spacing: 18))
+        layout {
+            ForEach([ProjectionMode.lyricsWithBackground, ProjectionMode.slides]) { mode in
+                Button {
+                    onSelect(mode)
+                } label: {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Image(systemName: mode == .lyricsWithBackground ? "music.mic" : "rectangle.on.rectangle.angled")
+                            .font(.system(size: 36, weight: .semibold))
+                        Text(mode == .lyricsWithBackground ? "A. 敬拜歌詞＋背景模式" : "B. PPT 簡報模式")
+                            .font(.title2.weight(.bold))
+                        Text(mode == .lyricsWithBackground ? "管理歌曲、今日流程、背景素材與歌詞投放。" : "匯入圖片投影片，使用大型控制台投放簡報。")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
+                    .padding(22)
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }

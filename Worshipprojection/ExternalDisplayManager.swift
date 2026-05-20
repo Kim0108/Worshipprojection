@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 internal import Combine
 
 class ExternalDisplayManager: ObservableObject {
