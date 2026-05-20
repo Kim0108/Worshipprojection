@@ -209,7 +209,7 @@ extension ContentView {
                 lyricSegmentsArea.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .background(Color(UIColor.secondarySystemBackground))
-            .tabItem { Label("Live 控制", systemImage: "play.tv.fill") }
+            .tabItem { Label("歌詞段落", systemImage: "play.tv.fill") }
             
             // 分頁 3：背景素材庫
             backgroundLibraryArea
@@ -454,7 +454,17 @@ extension ContentView {
         VStack(alignment: .leading, spacing: 15) {
             HStack {
                 Text("背景素材").font(.headline)
+    // 💡 1. 顯示佔用容量的 Section
+                Section(header: Text("本機素材佔用空間")) {
+                    HStack {
+//                        Text("本機素材總大小")
+//                        Spacer()
+                        Text(manager.storageUsageString)
+                            .foregroundColor(manager.storageUsageString.contains("GB") ? .red : .gray) // 塞滿 GB 變紅色警告
+                    }
+                }
                 Spacer()
+                //這邊是那兩顆新增資料夾和新增照片！！
                 Button {
                     showingNewBackgroundFolderAlert = true
                 } label: {
@@ -483,27 +493,64 @@ extension ContentView {
                     .overlay(RoundedRectangle(cornerRadius: 8)
                         .stroke(manager.selectedBackground == nil ? Color.orange : Color.clear, lineWidth: 3))
                     
-                    ForEach(Array(manager.backgroundLibrary.enumerated()), id: \.element.id) { index, bg in
-                        Button {
-                            withAnimation(.easeInOut(duration: 1.0)) { manager.selectedBackground = bg }
-                        } label: {
-                            VStack(spacing: 6) {
-                                previewImage(for: bg)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 80)
-                                Text(bg.displayName).font(.system(size: 15)).lineLimit(1)
+//                    ForEach(Array(manager.backgroundLibrary.enumerated()), id: \.element.id) { index, bg in
+//                        Button {
+//                            withAnimation(.easeInOut(duration: 1.0)) { manager.selectedBackground = bg }
+//                        } label: {
+//                            VStack(spacing: 6) {
+//                                previewImage(for: bg)
+//                                    .frame(maxWidth: .infinity)
+//                                    .frame(height: 80)
+//                                Text(bg.displayName).font(.system(size: 15)).lineLimit(1)
+//                            }
+//                        }
+//                        .contextMenu {
+//                            Button {
+//                                renamingBackground = bg
+//                                backgroundRenameText = bg.displayName
+//                            } label: { Label("重新命名", systemImage: "pencil") }
+//
+//                            Button(role: .destructive) {
+//                            // 💡 3. 套用我們剛剛寫好的「實體物理刪除」
+//                                manager.deleteBackground(bg, from: folder.id)
+//                            } label: {Label("刪除背景", systemImage: "trash")
+//                            }
+//                        }
+//                    }
+                    // 💡 1. 先用 if let 安全地抓出當前使用者正在查看的「資料夾」
+                    if let folder = manager.backgroundFolders.first(where: { $0.id == manager.activeBackgroundFolderID }) {
+                        
+                        // 💡 2. 改為針對該資料夾底下的 backgrounds 跑迴圈 (順便移除沒用到的 index 讓程式碼更乾淨)
+                        ForEach(folder.backgrounds) { bg in
+                            Button {
+                                withAnimation(.easeInOut(duration: 1.0)) { manager.selectedBackground = bg }
+                            } label: {
+                                VStack(spacing: 6) {
+                                    previewImage(for: bg)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 80)
+                                    Text(bg.displayName).font(.system(size: 15)).lineLimit(1)
+                                }
+                            }
+                            .contextMenu {
+                                Button {
+                                    renamingBackground = bg
+                                    backgroundRenameText = bg.displayName
+                                } label: { Label("重新命名", systemImage: "pencil") }
+
+                                Button(role: .destructive) {
+                                    // 💡 3. 因為最外層有 if let folder，這裡就能完美抓到 folder.id 進行實體刪除了！
+                                    manager.deleteBackground(bg, from: folder.id)
+                                } label: {
+                                    Label("刪除背景", systemImage: "trash")
+                                }
                             }
                         }
-                        .contextMenu {
-                            Button {
-                                renamingBackground = bg
-                                backgroundRenameText = bg.displayName
-                            } label: { Label("重新命名", systemImage: "pencil") }
-
-                            Button(role: .destructive) {
-                                manager.deleteBackground(at: IndexSet(integer: index))
-                            } label: { Label("刪除背景", systemImage: "trash") }
-                        }
+                    } else {
+                        // 防呆提示：如果使用者還沒選任何資料夾，顯示提示文字
+                        Text("請先選擇或建立背景資料夾")
+                            .foregroundColor(.gray)
+                            .padding()
                     }
                 }
                 .padding(.horizontal)
@@ -609,12 +656,45 @@ extension ContentView {
                 LabeledContent("投放模式", value: manager.projectionMode.title)
             }
 
-            Section("App 瘦身") {
+            Section("移除所有背景檔") {
                 Button(role: .destructive) {
                     manager.deleteAllBackgrounds()
                 } label: {
                     Label("刪除全部背景素材", systemImage: "trash")
                 }
+            }
+            // 💡 新增：App 狀態與內存儀表板
+            Section(header: Text("App 資源監測")) {
+                HStack {
+                    Label("目前執行記憶體", systemImage: "cpu")
+                    Spacer()
+                    Text(manager.memoryUsageString)
+                        .fontWeight(.bold)
+                        .foregroundColor(.blue)
+                }
+                HStack {
+                    Label("背景素材使用空間", systemImage: "internaldrive")
+                    Spacer()
+                    Text(manager.storageUsageString)
+                        .foregroundColor(.gray)
+                }
+//                // 💡 新增：一鍵深度瘦身按鈕
+//                Button(action: {
+//                    // 加上 SwiftUI 動態效果，讓數字變小時有流暢的轉場
+//                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+//                        manager.triggerAppSlimming()
+//                    }
+//                }) {
+//                    HStack {
+//                        Label("立刻執行 App 深度瘦身", systemImage: "sparkles")
+//                            .fontWeight(.semibold)
+//                        Spacer()
+//                        Image(systemName: "chevron.right")
+//                            .font(.footnote)
+//                            .foregroundColor(.orange)
+//                    }
+//                    .foregroundColor(.orange)
+//                }
             }
         }
     }
