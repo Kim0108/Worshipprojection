@@ -64,6 +64,7 @@ class LyricManager: ObservableObject {
     }
 // 💡 在變數宣告區，加上這行（用來儲存訂閱狀態）
     private var cancellables = Set<AnyCancellable>()
+
     init() {
         loadSongs()
         loadBackgrounds()
