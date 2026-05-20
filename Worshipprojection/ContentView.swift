@@ -25,6 +25,8 @@ struct ContentView: View {
     @State private var backgroundRenameText = ""
     @State private var renamingBackgroundFolder: BackgroundFolder?
     @State private var backgroundFolderRenameText = ""
+    @State private var selectedSongIDs = Set<UUID>()
+    @State private var isSelectingSongs = false
     
     @State private var showNamingAlert = false
     @State private var tempName = ""
@@ -165,28 +167,6 @@ extension ContentView {
                     sidebarIconButton(title: "今日流程", icon: "star.fill", type: .today)
                     
                     Spacer()
-                    
-                // 👇 ======= 新增這顆連線開關按鈕 ======= 👇
-                    Button {
-                        // 點擊時，根據目前狀態決定要開啟還是關閉
-                        if manager.multipeerManager.isActive {
-                            manager.multipeerManager.stopAll()
-                        } else {
-                            manager.multipeerManager.startConnection(role: .broadcaster)
-                        }
-                    } label: {
-                        VStack(spacing: 6) {
-                            // 用三元運算子讓開啟時變成綠色實心，關閉時為灰色空心
-                            Image(systemName: manager.multipeerManager.isActive ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right.slash")
-                                .font(.system(size: 24))
-                                .foregroundColor(manager.multipeerManager.isActive ? .green : .gray)
-                            
-                            Text(manager.multipeerManager.isActive ? "中斷連線" : "開啟連線")
-                                .font(.caption)
-                                .foregroundColor(manager.multipeerManager.isActive ? .green : .gray)
-                        }
-                    }
-                    // 👆 =================================== 👆
 
                     Button { showingSongEditor = true } label: {
                         VStack(spacing: 8) {
@@ -234,9 +214,6 @@ extension ContentView {
             // 分頁 3：背景素材庫
             backgroundLibraryArea
             .tabItem { Label("背景", systemImage: "photo.fill") }
-            
-            broadcastControlArea
-            .tabItem { Label("廣播", systemImage: "antenna.radiowaves.left.and.right") }
 
             fileManagementArea
             .tabItem { Label("檔案", systemImage: "shippingbox.fill") }
@@ -373,14 +350,55 @@ extension ContentView {
                 Text(manager.currentCategory == .all ? "所有歌曲" : "今日流程")
                     .font(.headline)
                 Spacer()
+                if isSelectingSongs {
+                    Button(selectedSongIDs.count == currentSongList.count ? "取消全選" : "全選") {
+                        toggleSelectAllSongs()
+                    }
+                    .font(.subheadline)
+                }
+                Button(isSelectingSongs ? "完成" : "選取") {
+                    isSelectingSongs.toggle()
+                    if !isSelectingSongs {
+                        selectedSongIDs.removeAll()
+                    }
+                }
+                .font(.subheadline.weight(.semibold))
             }
             .padding([.horizontal, .top])
+
+            if isSelectingSongs {
+                HStack(spacing: 10) {
+                    Button(role: .destructive) {
+                        deleteSelectedSongs()
+                    } label: {
+                        Label(manager.currentCategory == .all ? "刪除" : "移除", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(selectedSongIDs.isEmpty)
+
+                    Button {
+                        moveSelectedSongs()
+                    } label: {
+                        Label(manager.currentCategory == .all ? "加入今日流程" : "移回所有歌曲", systemImage: manager.currentCategory == .all ? "star.fill" : "music.note.list")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedSongIDs.isEmpty)
+                }
+                .padding(.horizontal)
+            }
             
             List {
-                let list = manager.currentCategory == .all ? manager.allSongs : manager.todaySetlist
-                ForEach(list) { song in
+                ForEach(currentSongList) { song in
                     let displaySong = manager.canonicalSong(for: song)
                     HStack {
+                        if isSelectingSongs {
+                            Image(systemName: selectedSongIDs.contains(song.id) ? "checkmark.circle.fill" : "circle")
+                                .font(.title3)
+                                .foregroundColor(selectedSongIDs.contains(song.id) ? .blue : .secondary)
+                        }
+
                         VStack(alignment: .leading, spacing: 5) {
                             Text(displaySong.title).font(.headline)
                             Text("\(displaySong.segments.count) 個段落").font(.caption).foregroundColor(.gray)
@@ -391,7 +409,13 @@ extension ContentView {
                         }
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { manager.selectedSong = displaySong }
+                    .onTapGesture {
+                        if isSelectingSongs {
+                            toggleSongSelection(song.id)
+                        } else {
+                            manager.selectedSong = displaySong
+                        }
+                    }
                     .onDrag { NSItemProvider(object: song.id.uuidString as NSString) }
                     .contextMenu {
                         Button { editingTarget = displaySong } label: { Label("編輯歌曲", systemImage: "pencil") }
@@ -419,6 +443,10 @@ extension ContentView {
                 }
             }
             .listStyle(.plain)
+        }
+        .onChange(of: manager.currentCategory) { _, _ in
+            selectedSongIDs.removeAll()
+            isSelectingSongs = false
         }
     }
     
@@ -692,26 +720,6 @@ extension ContentView {
         }
     }
     
-    // iPhone 專用的連線面板
-    private var broadcastControlArea: some View {
-        List {
-            Section("主控台廣播設定") {
-                Toggle("開啟廣播同步", isOn: Binding(
-                    get: { manager.multipeerManager.isActive },
-                    set: { isActive in
-                        if isActive { manager.multipeerManager.startConnection(role: .broadcaster) }
-                        else { manager.multipeerManager.stopAll() }
-                    }
-                ))
-                if manager.multipeerManager.isActive {
-                    Text("已連線設備：\(manager.multipeerManager.connectedPeers.count) 台")
-                        .foregroundColor(.green)
-                }
-            }
-        }
-        .navigationTitle("廣播同步")
-    }
-
     private func handleImportResult(_ result: Result<[URL], Error>) {
         do {
             guard let url = try result.get().first else { return }
@@ -733,6 +741,54 @@ extension ContentView {
         manager.projectionMode = .slides
         manager.isSlideBlackout = false
         switchMode(.slides)
+    }
+
+    private var currentSongList: [Song] {
+        manager.currentCategory == .all ? manager.allSongs : manager.todaySetlist
+    }
+
+    private func toggleSongSelection(_ id: UUID) {
+        if selectedSongIDs.contains(id) {
+            selectedSongIDs.remove(id)
+        } else {
+            selectedSongIDs.insert(id)
+        }
+    }
+
+    private func toggleSelectAllSongs() {
+        if selectedSongIDs.count == currentSongList.count {
+            selectedSongIDs.removeAll()
+        } else {
+            selectedSongIDs = Set(currentSongList.map(\.id))
+        }
+    }
+
+    private func deleteSelectedSongs() {
+        guard !selectedSongIDs.isEmpty else { return }
+        if manager.currentCategory == .all {
+            manager.allSongs.removeAll { selectedSongIDs.contains($0.id) }
+            manager.todaySetlist.removeAll { selectedSongIDs.contains($0.id) }
+            if let selected = manager.selectedSong, selectedSongIDs.contains(selected.id) {
+                manager.selectedSong = nil
+            }
+        } else {
+            manager.todaySetlist.removeAll { selectedSongIDs.contains($0.id) }
+        }
+        selectedSongIDs.removeAll()
+    }
+
+    private func moveSelectedSongs() {
+        guard !selectedSongIDs.isEmpty else { return }
+        if manager.currentCategory == .all {
+            let selectedSongs = manager.allSongs.filter { selectedSongIDs.contains($0.id) }
+            selectedSongs.forEach { manager.addToSetlist($0) }
+            manager.currentCategory = .today
+        } else {
+            manager.todaySetlist.removeAll { selectedSongIDs.contains($0.id) }
+            manager.currentCategory = .all
+        }
+        selectedSongIDs.removeAll()
+        isSelectingSongs = false
     }
 
     @ViewBuilder

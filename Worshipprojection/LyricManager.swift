@@ -587,10 +587,17 @@ class LyricManager: ObservableObject {
     }
 
     func exportPackage(format: ProjectExportFormat = .json) -> WorshipProjectDocument {
+        synchronizeSongsBetweenLists()
+        let songsForExport = uniqueSongsPreservingOrder(allSongs)
+        let exportedSongIDs = Set(songsForExport.map(\.id))
+        let setlistForExport = uniqueSongsPreservingOrder(todaySetlist.map { canonicalSong(for: $0) })
+            .filter { exportedSongIDs.contains($0.id) }
+
         let package = WorshipProjectPackage(
             exportedAt: Date(),
-            songs: allSongs,
-            todaySetlist: todaySetlist
+            songs: songsForExport,
+            todaySetlist: [],
+            todaySetlistIDs: setlistForExport.map(\.id)
         )
         return WorshipProjectDocument(package: package, format: format)
     }
@@ -599,15 +606,32 @@ class LyricManager: ObservableObject {
         var importedByOriginalId: [UUID: Song] = [:]
 
         for song in package.songs {
+            if let existing = existingSongMatching(song) {
+                importedByOriginalId[song.id] = existing
+                continue
+            }
+
             let imported = uniqueImportedSong(from: song)
             allSongs.append(imported)
             importedByOriginalId[song.id] = imported
         }
 
-        for song in package.todaySetlist {
+        let setlistSongs: [Song]
+        if let setlistIDs = package.todaySetlistIDs {
+            setlistSongs = setlistIDs.compactMap { id in
+                importedByOriginalId[id] ?? allSongs.first(where: { $0.id == id })
+            }
+        } else {
+            setlistSongs = package.todaySetlist
+        }
+
+        for song in setlistSongs {
             let imported: Song
             if let alreadyImported = importedByOriginalId[song.id] {
                 imported = alreadyImported
+            } else if let existing = existingSongMatching(song) {
+                imported = existing
+                importedByOriginalId[song.id] = existing
             } else {
                 imported = uniqueImportedSong(from: song)
                 allSongs.append(imported)
@@ -650,6 +674,39 @@ class LyricManager: ObservableObject {
         }
         imported.parseSegments()
         return imported
+    }
+
+    private func existingSongMatching(_ song: Song) -> Song? {
+        allSongs.first { existing in
+            existing.id == song.id || songContentKey(existing) == songContentKey(song)
+        }
+    }
+
+    private func uniqueSongsPreservingOrder(_ songs: [Song]) -> [Song] {
+        var seenIDs = Set<UUID>()
+        var seenContentKeys = Set<String>()
+        var uniqueSongs: [Song] = []
+
+        for song in songs {
+            let contentKey = songContentKey(song)
+            guard !seenIDs.contains(song.id), !seenContentKeys.contains(contentKey) else { continue }
+            seenIDs.insert(song.id)
+            seenContentKeys.insert(contentKey)
+            uniqueSongs.append(song)
+        }
+
+        return uniqueSongs
+    }
+
+    private func songContentKey(_ song: Song) -> String {
+        let title = song.title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let rawText = song.rawText
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(title)\u{1F}\(rawText)"
     }
 
     func startWebTeleprompter() {

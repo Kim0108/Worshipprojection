@@ -31,14 +31,12 @@ struct RoleGateView: View {
             if selectedMode == .lyricsWithBackground {
                 ContentView(switchMode: { switchProjectionMode(to: $0) })
                     .onAppear {
-                        manager.projectionMode = .lyricsWithBackground
-                        manager.setRole(.broadcaster)
+                        activateMode(.lyricsWithBackground)
                     }
             } else if selectedMode == .slides {
                 SlideModeView(switchMode: { switchProjectionMode(to: $0) })
                     .onAppear {
-                        manager.projectionMode = .slides
-                        manager.setRole(.broadcaster)
+                        activateMode(.slides)
                     }
             } else {
                 ModeSelectionView { mode in
@@ -49,11 +47,20 @@ struct RoleGateView: View {
     }
 
     private func switchProjectionMode(to mode: ProjectionMode) {
+        activateMode(mode)
+        selectedMode = mode
+    }
+
+    private func activateMode(_ mode: ProjectionMode) {
         manager.projectionMode = mode
         if mode == .slides {
             manager.isSlideBlackout = false
         }
-        selectedMode = mode
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            manager.setRole(.broadcaster)
+        } else {
+            manager.leaveCurrentRole()
+        }
     }
 }
 

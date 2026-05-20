@@ -63,13 +63,23 @@ struct SlideModeView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScaledPreviewView(manager: manager)
-                .frame(height: 220)
-                .padding()
-            largeControls
-                .padding(.horizontal)
-            Divider()
-            slideLibraryPanel
+
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    VStack(spacing: 10) {
+                        ScaledPreviewView(manager: manager)
+                            .frame(maxHeight: geo.size.height * 0.28)
+                            .padding(.horizontal, 12)
+                        compactControls
+                            .padding(.horizontal, 12)
+                    }
+                    .frame(height: geo.size.height * 0.5)
+
+                    Divider()
+                    slideLibraryPanel
+                        .frame(height: geo.size.height * 0.5)
+                }
+            }
         }
     }
 
@@ -101,7 +111,7 @@ struct SlideModeView: View {
         HStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("PPT 簡報模式")
-                    .font(.largeTitle.weight(.bold))
+                    .font(sizeClass == .compact ? .title2.weight(.bold) : .largeTitle.weight(.bold))
                 Text("圖片投影片獨立投放，控制與歌詞模式分開。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -119,22 +129,24 @@ struct SlideModeView: View {
                 .controlSize(.large)
             }
 
-            Toggle("廣播同步", isOn: Binding(
-                get: { manager.multipeerManager.isActive },
-                set: { isActive in
-                    if isActive {
-                        manager.multipeerManager.startConnection(role: .broadcaster)
-                    } else {
-                        manager.multipeerManager.stopAll()
+            if sizeClass != .compact {
+                Toggle("廣播同步", isOn: Binding(
+                    get: { manager.multipeerManager.isActive },
+                    set: { isActive in
+                        if isActive {
+                            manager.multipeerManager.startConnection(role: .broadcaster)
+                        } else {
+                            manager.multipeerManager.stopAll()
+                        }
                     }
-                }
-            ))
-            .toggleStyle(.button)
-            .tint(.green)
-            .controlSize(.large)
+                ))
+                .toggleStyle(.button)
+                .tint(.green)
+                .controlSize(.large)
+            }
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 18)
+        .padding(.horizontal, sizeClass == .compact ? 12 : 28)
+        .padding(.vertical, sizeClass == .compact ? 10 : 18)
     }
 
     private var largeControls: some View {
@@ -183,6 +195,41 @@ struct SlideModeView: View {
                     icon: "chevron.right",
                     isDisabled: manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1
                 ) {
+                    manager.goToNextSlide()
+                }
+            }
+        }
+    }
+
+    private var compactControls: some View {
+        VStack(spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pageLabel)
+                        .font(.headline.weight(.bold))
+                    Text(activeSlideName)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                PhotosPicker(selection: $selectedSlidePhotoItems, matching: .images) {
+                    Label("加入", systemImage: "photo.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            HStack(spacing: 8) {
+                compactSlideActionButton(title: "上一張", icon: "chevron.left", isDisabled: manager.slideLibrary.isEmpty || manager.activeSlideIndex == 0) {
+                    manager.goToPreviousSlide()
+                }
+                compactSlideActionButton(title: manager.isSlideBlackout ? "恢復" : "黑畫面", icon: manager.isSlideBlackout ? "eye" : "eye.slash", tint: manager.isSlideBlackout ? .green : .black, isDisabled: manager.slideLibrary.isEmpty) {
+                    manager.isSlideBlackout.toggle()
+                }
+                compactSlideActionButton(title: "下一張", icon: "chevron.right", isDisabled: manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1) {
                     manager.goToNextSlide()
                 }
             }
@@ -303,6 +350,24 @@ struct SlideModeView: View {
                 .font(.title3.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .frame(height: 76)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tint)
+        .disabled(isDisabled)
+    }
+
+    private func compactSlideActionButton(
+        title: String,
+        icon: String,
+        tint: Color = .blue,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
         }
         .buttonStyle(.borderedProminent)
         .tint(tint)

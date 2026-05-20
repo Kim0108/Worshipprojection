@@ -253,6 +253,7 @@ struct WorshipProjectPackage: Codable {
     var exportedAt: Date
     var songs: [Song]
     var todaySetlist: [Song]
+    var todaySetlistIDs: [UUID]? = nil
 }
 
 extension UTType {
