@@ -36,7 +36,15 @@ class LyricManager: ObservableObject {
 //    }
     
     @Published var activeStyle: TextSettings = TextSettings() // 正在投影的樣式
-    @Published var activeLyricContent: String = "" // 目前投影在銀幕上的文字內容
+    // ⭐️ 1. 新增：建立同步管理器
+    @Published var multipeerManager = MultipeerManager()
+//    @Published var activeLyricContent: String = "" // 目前投影在銀幕上的文字內容
+    // ⭐️ 2. 修改：當文字改變時，自動發送給台上的設備
+    @Published var activeLyricContent: String = "" {
+        didSet {
+            multipeerManager.send(lyric: activeLyricContent)
+        }
+    }
     
     @Published var previousBackground: BackgroundItem? = nil
     @Published var selectedBackground: BackgroundItem? {
