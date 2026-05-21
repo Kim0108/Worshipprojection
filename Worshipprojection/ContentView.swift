@@ -157,7 +157,7 @@ struct ContentView: View {
 // MARK: - 📱 iPhone 與 iPad 專屬佈局
 extension ContentView {
     
-    // 📱 iPhone 專用的底部 TabView 佈局
+// MARK: - 📱 iPhone 專用的底部 TabView 佈局
     private var iphoneTabView: some View {
         TabView {
             // 分頁 1：歌曲清單
