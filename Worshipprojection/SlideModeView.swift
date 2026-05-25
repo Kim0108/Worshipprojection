@@ -1,13 +1,17 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+internal import UniformTypeIdentifiers
 
 struct SlideModeView: View {
     @EnvironmentObject var manager: LyricManager
+    @EnvironmentObject var backgroundManager: BackgroundManager
     @Environment(\.horizontalSizeClass) private var sizeClass
     var switchMode: ((ProjectionMode) -> Void)? = nil
     @State private var selectedSlidePhotoItems: [PhotosPickerItem] = []
     @State private var showingNewFolderAlert = false
+    @State private var showingPDFImporter = false
+    @State private var importErrorMessage: String?
     @State private var newFolderName = ""
     @State private var isReorderingSlides = false
 
@@ -43,6 +47,21 @@ struct SlideModeView: View {
         } message: {
             Text("每個資料夾可以放不同場次或不同主題的簡報。")
         }
+        .fileImporter(
+            isPresented: $showingPDFImporter,
+            allowedContentTypes: [.pdf],
+            allowsMultipleSelection: false
+        ) { result in
+            handlePDFImportResult(result)
+        }
+        .alert("匯入 PDF", isPresented: Binding(
+            get: { importErrorMessage != nil },
+            set: { if !$0 { importErrorMessage = nil } }
+        )) {
+            Button("知道了", role: .cancel) { importErrorMessage = nil }
+        } message: {
+            Text(importErrorMessage ?? "")
+        }
     }
 
     private var ipadLayout: some View {
@@ -67,7 +86,7 @@ struct SlideModeView: View {
             GeometryReader { geo in
                 VStack(spacing: 0) {
                     VStack(spacing: 10) {
-                        ScaledPreviewView(manager: manager)
+                        ScaledPreviewView(manager: manager, backgroundManager: backgroundManager)
                             .frame(maxHeight: geo.size.height * 0.28)
                             .padding(.horizontal, 12)
                         compactControls
@@ -89,7 +108,7 @@ struct SlideModeView: View {
             Divider()
 
             VStack(spacing: 18) {
-                ScaledPreviewView(manager: manager)
+                ScaledPreviewView(manager: manager, backgroundManager: backgroundManager)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -129,21 +148,6 @@ struct SlideModeView: View {
                 .controlSize(.large)
             }
 
-            if sizeClass != .compact {
-                Toggle("廣播同步", isOn: Binding(
-                    get: { manager.multipeerManager.isActive },
-                    set: { isActive in
-                        if isActive {
-                            manager.multipeerManager.startConnection(role: .broadcaster)
-                        } else {
-                            manager.multipeerManager.stopAll()
-                        }
-                    }
-                ))
-                .toggleStyle(.button)
-                .tint(.green)
-                .controlSize(.large)
-            }
         }
         .padding(.horizontal, sizeClass == .compact ? 12 : 28)
         .padding(.vertical, sizeClass == .compact ? 10 : 18)
@@ -169,6 +173,16 @@ struct SlideModeView: View {
                         .frame(minHeight: 54)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button {
+                    showingPDFImporter = true
+                } label: {
+                    Label("匯入 PDF", systemImage: "doc.richtext")
+                        .font(.title3.weight(.semibold))
+                        .frame(minHeight: 54)
+                }
+                .buttonStyle(.bordered)
                 .controlSize(.large)
             }
 
@@ -220,6 +234,14 @@ struct SlideModeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+
+                Button {
+                    showingPDFImporter = true
+                } label: {
+                    Label("PDF", systemImage: "doc.richtext")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             HStack(spacing: 8) {
@@ -259,6 +281,14 @@ struct SlideModeView: View {
 
                 PhotosPicker(selection: $selectedSlidePhotoItems, matching: .images) {
                     Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    showingPDFImporter = true
+                } label: {
+                    Image(systemName: "doc.badge.plus")
                         .font(.title2)
                 }
                 .buttonStyle(.plain)
@@ -336,6 +366,30 @@ struct SlideModeView: View {
             return manager.slideLibrary.isEmpty ? "加入圖片後即可開始投放" : "目前為黑畫面"
         }
         return slide.displayName
+    }
+
+    private func handlePDFImportResult(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let needsStop = url.startAccessingSecurityScopedResource()
+            Task {
+                do {
+                    try await manager.importPDFSlides(from: url)
+                    if needsStop {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                } catch {
+                    if needsStop {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                    await MainActor.run {
+                        importErrorMessage = "PDF 匯入失敗：\(error.localizedDescription)"
+                    }
+                }
+            }
+        } catch {
+            importErrorMessage = "PDF 匯入失敗：\(error.localizedDescription)"
+        }
     }
 
     private func slideActionButton(
