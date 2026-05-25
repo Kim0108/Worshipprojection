@@ -8,9 +8,11 @@ class ExternalDisplayManager: ObservableObject {
     
     // 強持有 LyricManager，確保投影畫面能即時同步數據
     var manager: LyricManager
+    var backgroundManager: BackgroundManager
     
-    init(manager: LyricManager) {
+    init(manager: LyricManager, backgroundManager: BackgroundManager) {
         self.manager = manager
+        self.backgroundManager = backgroundManager
         setupSceneNotifications()
         checkForExistingScenes()
     }
@@ -66,7 +68,7 @@ class ExternalDisplayManager: ObservableObject {
             
             // 2. 注入 LiveDisplayView 並傳入 manager
             // 這裡確保投影出去的是純淨的畫面，無視安全區域 [cite: 35]
-            let view = LiveDisplayView(manager: self.manager)
+            let view = LiveDisplayView(manager: self.manager, backgroundManager: self.backgroundManager)
                 .edgesIgnoringSafeArea(.all)
             
             // 3. 使用 UIHostingController 將 SwiftUI 包裝進 UIKit 視窗 [cite: 35, 36]

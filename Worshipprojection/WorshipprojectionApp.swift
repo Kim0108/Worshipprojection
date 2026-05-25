@@ -5,19 +5,23 @@ internal import UniformTypeIdentifiers
 @main
 struct WorshipProjectionApp: App {
     @StateObject private var lyricManager = LyricManager()
+    @StateObject private var backgroundManager = BackgroundManager()
     @StateObject private var externalDisplayManager: ExternalDisplayManager
 
     init() {
         // 只在這裡建立唯一的 Source of Truth
         let sharedManager = LyricManager()
+        let sharedBackgroundManager = BackgroundManager()
         _lyricManager = StateObject(wrappedValue: sharedManager)
-        _externalDisplayManager = StateObject(wrappedValue: ExternalDisplayManager(manager: sharedManager))
+        _backgroundManager = StateObject(wrappedValue: sharedBackgroundManager)
+        _externalDisplayManager = StateObject(wrappedValue: ExternalDisplayManager(manager: sharedManager, backgroundManager: sharedBackgroundManager))
     }
 
     var body: some Scene {
         WindowGroup {
             RoleGateView()
                 .environmentObject(lyricManager)
+                .environmentObject(backgroundManager)
         }
     }
 }
