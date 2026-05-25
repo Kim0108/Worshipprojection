@@ -5,6 +5,7 @@ import AVFoundation
 
 struct ContentView: View {
     @EnvironmentObject var manager: LyricManager
+    @EnvironmentObject var backgroundManager: BackgroundManager
     var switchMode: ((ProjectionMode) -> Void)? = nil
     
     // 偵測螢幕大小 (iPhone 會是 .compact，iPad 橫向會是 .regular)
@@ -12,24 +13,23 @@ struct ContentView: View {
     
     @State private var showingSongEditor = false
     @State private var editingTarget: Song? = nil
-    @State private var selectedPhotosItem: PhotosPickerItem? = nil
     @State private var showingExporter = false
     @State private var showingImporter = false
     @State private var showingFileManagement = false
     @State private var exportFormat: ProjectExportFormat = .json
     @State private var exportDocument: WorshipProjectDocument?
     @State private var importErrorMessage: String?
-    @State private var showingNewBackgroundFolderAlert = false
-    @State private var newBackgroundFolderName = ""
-    @State private var renamingBackground: BackgroundItem?
-    @State private var backgroundRenameText = ""
-    @State private var renamingBackgroundFolder: BackgroundFolder?
-    @State private var backgroundFolderRenameText = ""
     @State private var selectedSongIDs = Set<UUID>()
     @State private var isSelectingSongs = false
-    
-    @State private var showNamingAlert = false
-    @State private var tempName = ""
+    @State private var isLayoutEditing = false
+    @State private var resizeStartHeight: Double?
+    @State private var showingLayoutSettings = false
+
+    @AppStorage("lyricsLivePreviewHeightPad") private var ipadLivePreviewHeight = 320.0
+    @AppStorage("lyricsLivePreviewHeightPhone") private var iphoneLivePreviewHeight = 230.0
+    @AppStorage("lyricsSegmentColumnCount") private var segmentColumnCount = 3
+    @AppStorage("lyricsSegmentCardHeight") private var segmentCardHeight = 80.0
+    @AppStorage("lyricsLeftPanelHidden") private var isLeftPanelHidden = false
     
     var body: some View {
         Group {
@@ -57,74 +57,17 @@ struct ContentView: View {
                     }
             }
         }
-        .onChange(of: selectedPhotosItem) { _, newItem in
-            if newItem != nil {
-                tempName = ""
-                showNamingAlert = true
-            }
-        }
-        .alert("命名素材", isPresented: $showNamingAlert) {
-            TextField("輸入背景名稱 (例如：動態星空)", text: $tempName)
-            Button("確定") {
-                if let item = selectedPhotosItem {
-                    Task {
-                        // 確保 manager 內有這個方法
-                        await manager.importBackground(from: item, customName: tempName)
-                        selectedPhotosItem = nil
+        .sheet(isPresented: $showingLayoutSettings) {
+            NavigationStack {
+                layoutSettingsArea
+                    .navigationTitle("版面設定")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showingLayoutSettings = false }
+                        }
                     }
-                }
             }
-            Button("取消", role: .cancel) {
-                selectedPhotosItem = nil
-            }
-        } message: {
-            Text("請為此素材取一個好辨識的名字，這將顯示在背景庫中。")
-        }
-        .alert("新增背景資料夾", isPresented: $showingNewBackgroundFolderAlert) {
-            TextField("例如：第一堂背景", text: $newBackgroundFolderName)
-            Button("建立") {
-                manager.createBackgroundFolder(named: newBackgroundFolderName)
-                newBackgroundFolderName = ""
-            }
-            Button("取消", role: .cancel) {
-                newBackgroundFolderName = ""
-            }
-        } message: {
-            Text("不同聚會或不同主題的背景可以分開整理。")
-        }
-        .alert("重新命名背景", isPresented: Binding(
-            get: { renamingBackground != nil },
-            set: { if !$0 { renamingBackground = nil } }
-        )) {
-            TextField("背景名稱", text: $backgroundRenameText)
-            Button("儲存") {
-                if let renamingBackground {
-                    manager.renameBackground(renamingBackground, to: backgroundRenameText)
-                }
-                renamingBackground = nil
-                backgroundRenameText = ""
-            }
-            Button("取消", role: .cancel) {
-                renamingBackground = nil
-                backgroundRenameText = ""
-            }
-        }
-        .alert("重新命名背景資料夾", isPresented: Binding(
-            get: { renamingBackgroundFolder != nil },
-            set: { if !$0 { renamingBackgroundFolder = nil } }
-        )) {
-            TextField("資料夾名稱", text: $backgroundFolderRenameText)
-            Button("儲存") {
-                if let renamingBackgroundFolder {
-                    manager.renameBackgroundFolder(renamingBackgroundFolder, to: backgroundFolderRenameText)
-                }
-                renamingBackgroundFolder = nil
-                backgroundFolderRenameText = ""
-            }
-            Button("取消", role: .cancel) {
-                renamingBackgroundFolder = nil
-                backgroundFolderRenameText = ""
-            }
+            .presentationDetents([.medium, .large])
         }
         .fileExporter(
             isPresented: $showingExporter,
@@ -190,6 +133,7 @@ extension ContentView {
                     Text("Live 控制台")
                         .font(.headline)
                     Spacer()
+                    layoutMenu
                     if let switchMode {
                         Button {
                             switchToSlides(using: switchMode)
@@ -204,8 +148,12 @@ extension ContentView {
                 .padding(.vertical, 10)
                 .background(Color(UIColor.secondarySystemBackground))
                 .zIndex(10)
-                livePreviewArea.frame(height: 250).clipped()
-                Divider()
+                livePreviewArea.frame(height: CGFloat(iphoneLivePreviewHeight)).clipped()
+                if isLayoutEditing {
+                    previewResizeHandle
+                } else {
+                    Divider()
+                }
                 lyricSegmentsArea.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .background(Color(UIColor.secondarySystemBackground))
@@ -224,73 +172,66 @@ extension ContentView {
     private var ipadHStackView: some View {
         HStack(spacing: 0) {
             // 左側資源管理區
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    // 第一欄
-                    VStack(spacing: 18) {
-                        sidebarIconButton(title: "所有歌曲", icon: "music.note.list", type: .all)
-                        sidebarIconButton(title: "今日流程", icon: "star.fill", type: .today)
-                        
-                        Spacer()
+            if !isLeftPanelHidden {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        // 第一欄
+                        VStack(spacing: 18) {
+                            sidebarIconButton(title: "所有歌曲", icon: "music.note.list", type: .all)
+                            sidebarIconButton(title: "今日流程", icon: "star.fill", type: .today)
 
-                        Button {
-                            showingFileManagement = true
-                        } label: {
-                            VStack(spacing: 6) {
-                                Image(systemName: "shippingbox.fill").font(.system(size: 24))
-                                Text("檔案").font(.caption).bold()
+                            Spacer()
+
+                            Button {
+                                showingFileManagement = true
+                            } label: {
+                                VStack(spacing: 6) {
+                                    Image(systemName: "shippingbox.fill").font(.system(size: 24))
+                                    Text("檔案").font(.caption).bold()
+                                }
+                                .padding(.vertical, 8).padding(.horizontal, 12)
+                                .foregroundColor(.teal)
+                                .background(Color.teal.opacity(0.1))
+                                .cornerRadius(8)
                             }
-                            .padding(.vertical, 8).padding(.horizontal, 12)
-                            .foregroundColor(.teal)
-                            .background(Color.teal.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                        
-                        Button {
-                            showingSongEditor = true
-                        } label: {
-                            VStack(spacing: 6) {
-                                Image(systemName: "plus.circle.fill").font(.system(size: 24))
-                                Text("新增歌曲").font(.caption).bold()
+
+                            Button {
+                                showingSongEditor = true
+                            } label: {
+                                VStack(spacing: 6) {
+                                    Image(systemName: "plus.circle.fill").font(.system(size: 24))
+                                    Text("新增歌曲").font(.caption).bold()
+                                }
+                                .padding(.vertical, 8).padding(.horizontal, 12)
+                                .foregroundColor(.blue)
+                                .background(Color.blue.opacity(0.1))
+                                .cornerRadius(8)
                             }
-                            .padding(.vertical, 8).padding(.horizontal, 12)
-                            .foregroundColor(.blue)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(8)
                         }
+                        .frame(width: 90)
+                        .padding(.vertical, 30)
+                        .background(Color(UIColor.systemGray6))
+
+                        Divider()
+
+                        // 第二欄
+                        songListSection.frame(maxWidth: .infinity)
                     }
-                    .frame(width: 90)
-                    .padding(.vertical, 30)
-                    .background(Color(UIColor.systemGray6))
-                    
+
                     Divider()
-                    
-                    // 第二欄
-                    songListSection.frame(maxWidth: .infinity)
+                    backgroundLibraryArea.frame(height: 400)
                 }
-                
+                .frame(width: 450)
+
                 Divider()
-                backgroundLibraryArea.frame(height: 400)
             }
-            .frame(width: 450)
-            
-            Divider()
             
             // 右側 Live 區
             VStack(spacing: 0) {
                 HStack {
-                    Text("Live 控制台").font(.title).foregroundColor(.red).bold()
+                    Text("Live 控制台").font(.title2).foregroundColor(.red).bold()
                     Spacer()
-                    // ⭐️ 主控端廣播開關
-                    Toggle("廣播同步", isOn: Binding(
-                        get: { manager.multipeerManager.isActive },
-                        set: { isActive in
-                            if isActive { manager.multipeerManager.startConnection(role: .broadcaster) }
-                            else { manager.multipeerManager.stopAll() }
-                        }
-                    ))
-                    .toggleStyle(.button)
-                    .tint(.green)
+                    layoutMenu
                     if let switchMode {
                         Button {
                             switchToSlides(using: switchMode)
@@ -305,8 +246,12 @@ extension ContentView {
                 .background(Color(UIColor.secondarySystemBackground))
                 .zIndex(10)
                 
-                livePreviewArea.frame(height: 400).clipped()
-                Divider()
+                livePreviewArea.frame(height: CGFloat(ipadLivePreviewHeight)).clipped()
+                if isLayoutEditing {
+                    previewResizeHandle
+                } else {
+                    Divider()
+                }
                 lyricSegmentsArea.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .background(Color(UIColor.secondarySystemBackground))
@@ -451,153 +396,7 @@ extension ContentView {
     }
     
     private var backgroundLibraryArea: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                Text("背景素材").font(.headline)
-    // 💡 1. 顯示佔用容量的 Section
-                Section(header: Text("本機素材佔用空間")) {
-                    HStack {
-//                        Text("本機素材總大小")
-//                        Spacer()
-                        Text(manager.storageUsageString)
-                            .foregroundColor(manager.storageUsageString.contains("GB") ? .red : .gray) // 塞滿 GB 變紅色警告
-                    }
-                }
-                Spacer()
-                //這邊是那兩顆新增資料夾和新增照片！！
-                Button {
-                    showingNewBackgroundFolderAlert = true
-                } label: {
-                    Image(systemName: "folder.badge.plus").font(.title3)
-                }
-                PhotosPicker(selection: $selectedPhotosItem, matching: .any(of: [.videos, .images])) {
-                    Image(systemName: "photo.badge.plus").font(.title3)
-                }
-            }
-            .padding([.horizontal, .top])
-
-            backgroundFolderStrip
-            
-            ScrollView(.vertical, showsIndicators: true) {
-                let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-                LazyVGrid(columns: columns, spacing: 15) {
-                    // 加入清空背景的選項
-                    Button {
-                        withAnimation { manager.selectedBackground = nil }
-                    } label: {
-                        VStack(spacing: 6) {
-                            Rectangle().fill(Color.black).frame(height: 80).cornerRadius(8)
-                            Text("純黑 (無背景)").font(.system(size: 15))
-                        }.foregroundColor(.primary)
-                    }
-                    .overlay(RoundedRectangle(cornerRadius: 8)
-                        .stroke(manager.selectedBackground == nil ? Color.orange : Color.clear, lineWidth: 3))
-                    
-//                    ForEach(Array(manager.backgroundLibrary.enumerated()), id: \.element.id) { index, bg in
-//                        Button {
-//                            withAnimation(.easeInOut(duration: 1.0)) { manager.selectedBackground = bg }
-//                        } label: {
-//                            VStack(spacing: 6) {
-//                                previewImage(for: bg)
-//                                    .frame(maxWidth: .infinity)
-//                                    .frame(height: 80)
-//                                Text(bg.displayName).font(.system(size: 15)).lineLimit(1)
-//                            }
-//                        }
-//                        .contextMenu {
-//                            Button {
-//                                renamingBackground = bg
-//                                backgroundRenameText = bg.displayName
-//                            } label: { Label("重新命名", systemImage: "pencil") }
-//
-//                            Button(role: .destructive) {
-//                            // 💡 3. 套用我們剛剛寫好的「實體物理刪除」
-//                                manager.deleteBackground(bg, from: folder.id)
-//                            } label: {Label("刪除背景", systemImage: "trash")
-//                            }
-//                        }
-//                    }
-                    // 💡 1. 先用 if let 安全地抓出當前使用者正在查看的「資料夾」
-                    if let folder = manager.backgroundFolders.first(where: { $0.id == manager.activeBackgroundFolderID }) {
-                        
-                        // 💡 2. 改為針對該資料夾底下的 backgrounds 跑迴圈 (順便移除沒用到的 index 讓程式碼更乾淨)
-                        ForEach(folder.backgrounds) { bg in
-                            Button {
-                                withAnimation(.easeInOut(duration: 1.0)) { manager.selectedBackground = bg }
-                            } label: {
-                                VStack(spacing: 6) {
-                                    previewImage(for: bg)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 80)
-                                    Text(bg.displayName).font(.system(size: 15)).lineLimit(1)
-                                }
-                            }
-                            .contextMenu {
-                                Button {
-                                    renamingBackground = bg
-                                    backgroundRenameText = bg.displayName
-                                } label: { Label("重新命名", systemImage: "pencil") }
-
-                                Button(role: .destructive) {
-                                    // 💡 3. 因為最外層有 if let folder，這裡就能完美抓到 folder.id 進行實體刪除了！
-                                    manager.deleteBackground(bg, from: folder.id)
-                                } label: {
-                                    Label("刪除背景", systemImage: "trash")
-                                }
-                            }
-                        }
-                    } else {
-                        // 防呆提示：如果使用者還沒選任何資料夾，顯示提示文字
-                        Text("請先選擇或建立背景資料夾")
-                            .foregroundColor(.gray)
-                            .padding()
-                    }
-                }
-                .padding(.horizontal)
-            }
-        }
-        .background(Color(UIColor.secondarySystemBackground))
-    }
-
-    private var backgroundFolderStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                if manager.backgroundFolders.isEmpty {
-                    Button {
-                        showingNewBackgroundFolderAlert = true
-                    } label: {
-                        Label("建立第一個資料夾", systemImage: "folder.badge.plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    ForEach(manager.backgroundFolders) { folder in
-                        Button {
-                            manager.selectBackgroundFolder(folder)
-                        } label: {
-                            Label(folder.name, systemImage: "folder.fill")
-                                .lineLimit(1)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(folder.id == manager.activeBackgroundFolder?.id ? .blue : .gray)
-                        .contextMenu {
-                            Button {
-                                renamingBackgroundFolder = folder
-                                backgroundFolderRenameText = folder.name
-                            } label: {
-                                Label("重新命名資料夾", systemImage: "pencil")
-                            }
-
-                            Button(role: .destructive) {
-                                manager.deleteBackgroundFolder(folder)
-                            } label: {
-                                Label("刪除資料夾", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal)
-        }
+        BackgroundLibraryPanel(backgroundManager: backgroundManager)
     }
 
     private var fileManagementArea: some View {
@@ -652,13 +451,13 @@ extension ContentView {
             Section("目前內容") {
                 LabeledContent("歌曲", value: "\(manager.allSongs.count) 首")
                 LabeledContent("今日流程", value: "\(manager.todaySetlist.count) 首")
-                LabeledContent("背景素材", value: "\(manager.totalBackgroundCount) 個（不打包）")
+                LabeledContent("背景素材", value: "\(backgroundManager.totalBackgroundCount) 個（不打包）")
                 LabeledContent("投放模式", value: manager.projectionMode.title)
             }
 
             Section("移除所有背景檔") {
                 Button(role: .destructive) {
-                    manager.deleteAllBackgrounds()
+                    backgroundManager.deleteAllBackgrounds()
                 } label: {
                     Label("刪除全部背景素材", systemImage: "trash")
                 }
@@ -668,33 +467,16 @@ extension ContentView {
                 HStack {
                     Label("目前執行記憶體", systemImage: "cpu")
                     Spacer()
-                    Text(manager.memoryUsageString)
+                    Text(backgroundManager.memoryUsageString)
                         .fontWeight(.bold)
                         .foregroundColor(.blue)
                 }
                 HStack {
                     Label("背景素材使用空間", systemImage: "internaldrive")
                     Spacer()
-                    Text(manager.storageUsageString)
+                    Text(backgroundManager.storageUsageString)
                         .foregroundColor(.gray)
                 }
-//                // 💡 新增：一鍵深度瘦身按鈕
-//                Button(action: {
-//                    // 加上 SwiftUI 動態效果，讓數字變小時有流暢的轉場
-//                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-//                        manager.triggerAppSlimming()
-//                    }
-//                }) {
-//                    HStack {
-//                        Label("立刻執行 App 深度瘦身", systemImage: "sparkles")
-//                            .fontWeight(.semibold)
-//                        Spacer()
-//                        Image(systemName: "chevron.right")
-//                            .font(.footnote)
-//                            .foregroundColor(.orange)
-//                    }
-//                    .foregroundColor(.orange)
-//                }
             }
         }
     }
@@ -746,7 +528,7 @@ extension ContentView {
     
     private var livePreviewArea: some View {
         VStack {
-            ScaledPreviewView(manager: manager) // 💡 替換成下方修正後的結構名稱
+            ScaledPreviewView(manager: manager, backgroundManager: backgroundManager) // 💡 替換成下方修正後的結構名稱
                 .cornerRadius(12)
                 .shadow(radius: 5)
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.red.opacity(0.8), lineWidth: 2))
@@ -759,15 +541,175 @@ extension ContentView {
         .background(Color.black.opacity(0.05))
     }
 
+    private var layoutMenu: some View {
+        Button {
+            showingLayoutSettings = true
+        } label: {
+            Label("版面", systemImage: "slider.horizontal.3")
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private var layoutSettingsArea: some View {
+        Form {
+            Section("調整") {
+                Toggle("調整版面", isOn: $isLayoutEditing)
+                if sizeClass != .compact {
+                    Toggle("顯示左側管理欄", isOn: Binding(
+                        get: { !isLeftPanelHidden },
+                        set: { isLeftPanelHidden = !$0 }
+                    ))
+                }
+            }
+
+            Section("Live 預覽") {
+                Picker("預覽大小", selection: previewSizeBinding) {
+                    Text("小").tag(PreviewSize.small)
+                    Text("中").tag(PreviewSize.medium)
+                    Text("大").tag(PreviewSize.large)
+                    Text("自訂").tag(PreviewSize.custom)
+                }
+                .pickerStyle(.segmented)
+
+                HStack {
+                    Text("高度")
+                    Slider(
+                        value: currentPreviewHeightBinding,
+                        in: sizeClass == .compact ? 160...340 : 240...520,
+                        step: 10
+                    )
+                    Text("\(Int(currentPreviewHeight))")
+                        .monospacedDigit()
+                        .foregroundColor(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+
+            Section("段落按鈕") {
+                Picker("欄數", selection: $segmentColumnCount) {
+                    Text("2").tag(2)
+                    Text("3").tag(3)
+                    Text("4").tag(4)
+                }
+                .pickerStyle(.segmented)
+
+                Picker("大小", selection: segmentCardSizeBinding) {
+                    Text("小").tag(SegmentCardSize.small)
+                    Text("中").tag(SegmentCardSize.medium)
+                    Text("大").tag(SegmentCardSize.large)
+                    Text("自訂").tag(SegmentCardSize.custom)
+                }
+                .pickerStyle(.segmented)
+
+                HStack {
+                    Text("高度")
+                    Slider(value: $segmentCardHeight, in: 56...120, step: 4)
+                    Text("\(Int(segmentCardHeight))")
+                        .monospacedDigit()
+                        .foregroundColor(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+
+            Section {
+                Button {
+                    resetLayoutSettings()
+                } label: {
+                    Label("重設版面", systemImage: "arrow.counterclockwise")
+                }
+            }
+        }
+    }
+
+    private var previewResizeHandle: some View {
+        ZStack {
+            Divider()
+            Capsule()
+                .fill(Color.secondary.opacity(0.45))
+                .frame(width: 54, height: 5)
+        }
+        .frame(height: 18)
+        .background(Color(UIColor.secondarySystemBackground))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    let currentHeight = sizeClass == .compact ? iphoneLivePreviewHeight : ipadLivePreviewHeight
+                    if resizeStartHeight == nil {
+                        resizeStartHeight = currentHeight
+                    }
+                    let startHeight = resizeStartHeight ?? currentHeight
+                    let lowerLimit = sizeClass == .compact ? 160.0 : 240.0
+                    let upperLimit = sizeClass == .compact ? 340.0 : 520.0
+                    setPreviewHeight(min(max(startHeight + Double(value.translation.height), lowerLimit), upperLimit))
+                }
+                .onEnded { _ in
+                    resizeStartHeight = nil
+                }
+        )
+    }
+
+    private func setPreviewHeight(_ height: Double) {
+        if sizeClass == .compact {
+            iphoneLivePreviewHeight = height
+        } else {
+            ipadLivePreviewHeight = height
+        }
+    }
+
+    private var currentPreviewHeight: Double {
+        sizeClass == .compact ? iphoneLivePreviewHeight : ipadLivePreviewHeight
+    }
+
+    private var currentPreviewHeightBinding: Binding<Double> {
+        Binding(
+            get: { currentPreviewHeight },
+            set: { setPreviewHeight($0) }
+        )
+    }
+
+    private var previewSizeBinding: Binding<PreviewSize> {
+        Binding(
+            get: { PreviewSize(height: currentPreviewHeight, isCompact: sizeClass == .compact) },
+            set: { size in
+                if let height = size.height(isCompact: sizeClass == .compact) {
+                    setPreviewHeight(height)
+                }
+            }
+        )
+    }
+
+    private var segmentCardSizeBinding: Binding<SegmentCardSize> {
+        Binding(
+            get: { SegmentCardSize(height: segmentCardHeight) },
+            set: { size in
+                if let height = size.height {
+                    segmentCardHeight = height
+                }
+            }
+        )
+    }
+
+    private func resetLayoutSettings() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            ipadLivePreviewHeight = 320
+            iphoneLivePreviewHeight = 230
+            segmentColumnCount = 3
+            segmentCardHeight = 80
+            isLeftPanelHidden = false
+            isLayoutEditing = false
+        }
+    }
+
     private var lyricSegmentsArea: some View {
         VStack(alignment: .leading) {
             Text("當前歌曲段落選擇").font(.headline).padding([.horizontal, .top])
             if let song = manager.selectedSong {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    LazyVGrid(columns: lyricSegmentColumns, spacing: 10) {
                         ForEach(song.segments) { segment in
                             Button {
-                                withAnimation(.easeInOut(duration: 0.5)) {
+                                withAnimation(.easeInOut(duration: 0.25)) {
                                     manager.activeStyle = song.style
                                     manager.activeLyricContent = segment.content
                                 }
@@ -776,7 +718,7 @@ extension ContentView {
                                     Text(segment.label).font(.system(size: 18, weight: .bold))
                                     Text(segment.content).font(.system(size: 10)).lineLimit(1).opacity(0.7)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 80)
+                                .frame(maxWidth: .infinity, minHeight: CGFloat(segmentCardHeight))
                                 .background(manager.activeLyricContent == segment.content ? Color.orange : Color.blue)
                                 .foregroundColor(.white)
                                 .cornerRadius(12)
@@ -784,10 +726,10 @@ extension ContentView {
                             }
                         }
                         Button {
-                            withAnimation(.easeInOut(duration: 0.5)) { manager.activeLyricContent = "" }
+                            withAnimation(.easeInOut(duration: 0.25)) { manager.activeLyricContent = "" }
                         } label: {
                             Text("清空文字")
-                                .frame(maxWidth: .infinity, minHeight: 80)
+                                .frame(maxWidth: .infinity, minHeight: CGFloat(segmentCardHeight))
                                 .background(Color.gray.opacity(0.3))
                                 .cornerRadius(12)
                         }
@@ -798,6 +740,13 @@ extension ContentView {
                 ContentUnavailableView("選取歌曲以顯示段落", systemImage: "hand.tap")
             }
         }
+    }
+
+    private var lyricSegmentColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible()),
+            count: min(max(segmentColumnCount, 2), 4)
+        )
     }
     
     private func handleImportResult(_ result: Result<[URL], Error>) {
@@ -871,11 +820,273 @@ extension ContentView {
         isSelectingSongs = false
     }
 
+}
+
+private enum PreviewSize: Hashable {
+    case small
+    case medium
+    case large
+    case custom
+
+    init(height: Double, isCompact: Bool) {
+        let small = isCompact ? 180.0 : 260.0
+        let medium = isCompact ? 230.0 : 320.0
+        let large = isCompact ? 300.0 : 420.0
+        if abs(height - small) < 1 {
+            self = .small
+        } else if abs(height - medium) < 1 {
+            self = .medium
+        } else if abs(height - large) < 1 {
+            self = .large
+        } else {
+            self = .custom
+        }
+    }
+
+    func height(isCompact: Bool) -> Double? {
+        switch self {
+        case .small:
+            isCompact ? 180 : 260
+        case .medium:
+            isCompact ? 230 : 320
+        case .large:
+            isCompact ? 300 : 420
+        case .custom:
+            nil
+        }
+    }
+}
+
+private enum SegmentCardSize: Hashable {
+    case small
+    case medium
+    case large
+    case custom
+
+    init(height: Double) {
+        if abs(height - 64) < 1 {
+            self = .small
+        } else if abs(height - 80) < 1 {
+            self = .medium
+        } else if abs(height - 104) < 1 {
+            self = .large
+        } else {
+            self = .custom
+        }
+    }
+
+    var height: Double? {
+        switch self {
+        case .small:
+            64
+        case .medium:
+            80
+        case .large:
+            104
+        case .custom:
+            nil
+        }
+    }
+}
+
+struct BackgroundLibraryPanel: View {
+    @ObservedObject var backgroundManager: BackgroundManager
+    private static let thumbnailCache = NSCache<NSURL, UIImage>()
+
+    @State private var selectedPhotosItems: [PhotosPickerItem] = []
+    @State private var showingNewBackgroundFolderAlert = false
+    @State private var newBackgroundFolderName = ""
+    @State private var renamingBackground: BackgroundItem?
+    @State private var backgroundRenameText = ""
+    @State private var renamingBackgroundFolder: BackgroundFolder?
+    @State private var backgroundFolderRenameText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            header
+            backgroundFolderStrip
+            backgroundGrid
+        }
+        .background(Color(UIColor.secondarySystemBackground))
+        .onChange(of: selectedPhotosItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            Task {
+                for item in newItems {
+                    await backgroundManager.importBackground(from: item)
+                }
+                selectedPhotosItems = []
+            }
+        }
+        .alert("新增背景資料夾", isPresented: $showingNewBackgroundFolderAlert) {
+            TextField("例如：第一堂背景", text: $newBackgroundFolderName)
+            Button("建立") {
+                backgroundManager.createBackgroundFolder(named: newBackgroundFolderName)
+                newBackgroundFolderName = ""
+            }
+            Button("取消", role: .cancel) {
+                newBackgroundFolderName = ""
+            }
+        } message: {
+            Text("不同聚會或不同主題的背景可以分開整理。")
+        }
+        .alert("重新命名背景", isPresented: Binding(
+            get: { renamingBackground != nil },
+            set: { if !$0 { renamingBackground = nil } }
+        )) {
+            TextField("背景名稱", text: $backgroundRenameText)
+            Button("儲存") {
+                if let renamingBackground {
+                    backgroundManager.renameBackground(renamingBackground, to: backgroundRenameText)
+                }
+                renamingBackground = nil
+                backgroundRenameText = ""
+            }
+            Button("取消", role: .cancel) {
+                renamingBackground = nil
+                backgroundRenameText = ""
+            }
+        }
+        .alert("重新命名背景資料夾", isPresented: Binding(
+            get: { renamingBackgroundFolder != nil },
+            set: { if !$0 { renamingBackgroundFolder = nil } }
+        )) {
+            TextField("資料夾名稱", text: $backgroundFolderRenameText)
+            Button("儲存") {
+                if let renamingBackgroundFolder {
+                    backgroundManager.renameBackgroundFolder(renamingBackgroundFolder, to: backgroundFolderRenameText)
+                }
+                renamingBackgroundFolder = nil
+                backgroundFolderRenameText = ""
+            }
+            Button("取消", role: .cancel) {
+                renamingBackgroundFolder = nil
+                backgroundFolderRenameText = ""
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("背景素材").font(.headline)
+            Section(header: Text("本機素材佔用空間")) {
+                HStack {
+                    Text(backgroundManager.storageUsageString)
+                        .foregroundColor(backgroundManager.storageUsageString.contains("GB") ? .red : .gray)
+                }
+            }
+            Spacer()
+            Button {
+                showingNewBackgroundFolderAlert = true
+            } label: {
+                Image(systemName: "folder.badge.plus").font(.title2)
+            }
+            PhotosPicker(selection: $selectedPhotosItems, matching: .any(of: [.videos, .images])) {
+                Image(systemName: "photo.badge.plus").font(.title2)
+            }
+        }
+        .padding([.horizontal, .top])
+    }
+
+    private var backgroundFolderStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                if backgroundManager.backgroundFolders.isEmpty {
+                    Button {
+                        showingNewBackgroundFolderAlert = true
+                    } label: {
+                        Label("建立第一個資料夾", systemImage: "folder.badge.plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    ForEach(backgroundManager.backgroundFolders) { folder in
+                        Button {
+                            backgroundManager.selectBackgroundFolder(folder)
+                        } label: {
+                            Label(folder.name, systemImage: "folder.fill")
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(folder.id == backgroundManager.activeBackgroundFolder?.id ? .blue : .gray)
+                        .contextMenu {
+                            Button {
+                                renamingBackgroundFolder = folder
+                                backgroundFolderRenameText = folder.name
+                            } label: {
+                                Label("重新命名資料夾", systemImage: "pencil")
+                            }
+
+                            Button(role: .destructive) {
+                                backgroundManager.deleteBackgroundFolder(folder)
+                            } label: {
+                                Label("刪除資料夾", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private var backgroundGrid: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+            LazyVGrid(columns: columns, spacing: 15) {
+                Button {
+                    withAnimation { backgroundManager.selectedBackground = nil }
+                } label: {
+                    VStack(spacing: 6) {
+                        Rectangle().fill(Color.black).frame(height: 80).cornerRadius(8)
+                        Text("純黑 (無背景)").font(.system(size: 15))
+                    }.foregroundColor(.primary)
+                }
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(backgroundManager.selectedBackground == nil ? Color.orange : Color.clear, lineWidth: 3))
+
+                if let folder = backgroundManager.backgroundFolders.first(where: { $0.id == backgroundManager.activeBackgroundFolderID }) {
+                    ForEach(folder.backgrounds) { background in
+                        Button {
+                            withAnimation(.easeInOut(duration: 1.0)) {
+                                backgroundManager.selectedBackground = background
+                            }
+                        } label: {
+                            VStack(spacing: 6) {
+                                previewImage(for: background)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 80)
+                                Text(background.displayName).font(.system(size: 15)).lineLimit(1)
+                            }
+                        }
+                        .contextMenu {
+                            Button {
+                                renamingBackground = background
+                                backgroundRenameText = background.displayName
+                            } label: {
+                                Label("重新命名", systemImage: "pencil")
+                            }
+
+                            Button(role: .destructive) {
+                                backgroundManager.deleteBackground(background, from: folder.id)
+                            } label: {
+                                Label("刪除背景", systemImage: "trash")
+                            }
+                        }
+                    }
+                } else {
+                    Text("請先選擇或建立背景資料夾")
+                        .foregroundColor(.gray)
+                        .padding()
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
     @ViewBuilder
-    private func previewImage(for bg: BackgroundItem) -> some View {
+    private func previewImage(for background: BackgroundItem) -> some View {
         ZStack {
-            if bg.isVideo {
-                if let thumbnail = videoThumbnail(for: bg.fileURL) {
+            if background.isVideo {
+                if let thumbnail = videoThumbnail(for: background.fileURL) {
                     Image(uiImage: thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -888,7 +1099,7 @@ extension ContentView {
                     Rectangle().fill(Color.black)
                         .overlay(Image(systemName: "video.fill").foregroundColor(.white.opacity(0.5)))
                 }
-            } else if let uiImage = UIImage(contentsOfFile: bg.fileURL.path) {
+            } else if let uiImage = UIImage(contentsOfFile: background.fileURL.path) {
                 Image(uiImage: uiImage).resizable().aspectRatio(contentMode: .fill)
             } else {
                 Rectangle().fill(Color.gray.opacity(0.3))
@@ -898,22 +1109,28 @@ extension ContentView {
         .cornerRadius(8)
         .clipped()
         .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(manager.selectedBackground?.id == bg.id ? Color.orange : Color.clear, lineWidth: 3))
+            .stroke(backgroundManager.selectedBackground?.id == background.id ? Color.orange : Color.clear, lineWidth: 3))
     }
 
     private func videoThumbnail(for url: URL) -> UIImage? {
+        if let cached = Self.thumbnailCache.object(forKey: url as NSURL) {
+            return cached
+        }
+
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         guard let cgImage = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
-        return UIImage(cgImage: cgImage)
+        let image = UIImage(cgImage: cgImage)
+        Self.thumbnailCache.setObject(image, forKey: url as NSURL)
+        return image
     }
-
 }
-    
+
 // MARK: - 💡 修正原本命名衝突的結構 (struct 首字母需大寫)
 struct ScaledPreviewView: View {
     @ObservedObject var manager: LyricManager
+    @ObservedObject var backgroundManager: BackgroundManager
 
     let standardWidth: CGFloat = 1920
     let standardHeight: CGFloat = 1080
@@ -921,7 +1138,7 @@ struct ScaledPreviewView: View {
     var body: some View {
         GeometryReader { geo in
             let scale = geo.size.width / standardWidth
-            LiveDisplayView(manager: manager)
+            LiveDisplayView(manager: manager, backgroundManager: backgroundManager)
                 .frame(width: standardWidth, height: standardHeight)
                 .clipped()
                 .scaleEffect(scale, anchor: .topLeading)
