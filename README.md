@@ -125,50 +125,42 @@ iPad / iPhone 上的 Live 預覽與 AirPlay / 外接螢幕輸出使用同一套 
 
 ## 打包成 IPA
 
-### Xcode 圖形介面
+### 第一步：從 Xcode Archive 產生 IPA
 
-1. Xcode 開啟專案。
-2. 裝置選 `Any iOS Device (arm64)`，不要選模擬器。
-3. 選 `Product > Archive`。
-4. Archive 完成後在 Organizer 選 `Distribute App`。
-5. 依用途選 `Development`、`Ad Hoc` 或 App Store / TestFlight 流程。
-
-### 命令列
+1. 在 Xcode 執行 `Product > Archive`。
+2. Archive 完成後，在 Organizer 對該 Archive 選 `Show in Finder`。
+3. 打開 Terminal，切到使用者根目錄，執行：
 
 ```bash
-xcodebuild archive \
-  -project Worshipprojection.xcodeproj \
-  -scheme Worshipprojection \
-  -configuration Release \
-  -destination "generic/platform=iOS" \
-  -archivePath build/Worshipprojection.xcarchive
+chmod 777 ipagen.sh
 ```
 
-再用 `ExportOptions.plist` 匯出：
+4. 繼續執行：
 
 ```bash
-xcodebuild -exportArchive \
-  -archivePath build/Worshipprojection.xcarchive \
-  -exportPath build/export \
-  -exportOptionsPlist ExportOptions.plist
+./ipagen.sh <file-path>
 ```
 
-範例 `ExportOptions.plist`：
+`<file-path>` 可以直接把剛剛 Finder 找到的 Archive 檔拖進 Terminal。指令前面不需要輸入 `$`。
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key>
-  <string>development</string>
-  <key>signingStyle</key>
-  <string>automatic</string>
-</dict>
-</plist>
-```
+5. 完成後，桌面會產生一個 `App.ipa`。
+6. 記得把 `App.ipa` 安裝到要測試的設備裡。
 
-打包 IPA 需要完整 Xcode toolchain 與正確簽章設定；只有 Command Line Tools 不夠。
+### 第二步：用 SideStore 安裝到設備
+
+1. 在 iLoader 登入 Apple ID。
+2. 在旁邊找到要載入的 device。
+3. device 需要先下載 `LocalDevVPN`；如果 iLoader 找不到 device，就改用接線。
+4. 安裝 SideStore。
+5. 在 SideStore 登入 Apple ID。
+6. 到 `My Apps`，按左上角 `+`。
+7. 找到剛剛打包好的 `App.ipa`，安裝即可。
+
+注意事項：
+
+- 打包 IPA 仍需要完整 Xcode toolchain；只有 Command Line Tools 不夠。
+- `ipagen.sh` 需放在執行指令的目錄，或用完整路徑執行。
+- 使用 Apple ID、iLoader、SideStore 與 LocalDevVPN 時，請確認設備與帳號授權狀態正常。
 
 ## 目前資料儲存
 
