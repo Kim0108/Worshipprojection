@@ -194,8 +194,6 @@ struct SlideModeView: View {
                 ) {
                     manager.goToPreviousSlide()
                 }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                .keyboardShortcut(.upArrow, modifiers: [])
 
                 slideActionButton(
                     title: manager.isSlideBlackout ? "恢復畫面" : "黑畫面",
@@ -213,9 +211,9 @@ struct SlideModeView: View {
                 ) {
                     manager.goToNextSlide()
                 }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                .keyboardShortcut(.downArrow, modifiers: [])
             }
+
+            slideKeyboardShortcuts
         }
     }
 
@@ -252,17 +250,15 @@ struct SlideModeView: View {
                 compactSlideActionButton(title: "上一張", icon: "chevron.left", isDisabled: manager.slideLibrary.isEmpty || manager.activeSlideIndex == 0) {
                     manager.goToPreviousSlide()
                 }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                .keyboardShortcut(.upArrow, modifiers: [])
                 compactSlideActionButton(title: manager.isSlideBlackout ? "恢復" : "黑畫面", icon: manager.isSlideBlackout ? "eye" : "eye.slash", tint: manager.isSlideBlackout ? .green : .black, isDisabled: manager.slideLibrary.isEmpty) {
                     manager.isSlideBlackout.toggle()
                 }
                 compactSlideActionButton(title: "下一張", icon: "chevron.right", isDisabled: manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1) {
                     manager.goToNextSlide()
                 }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                .keyboardShortcut(.downArrow, modifiers: [])
             }
+
+            slideKeyboardShortcuts
         }
     }
 
@@ -434,6 +430,26 @@ struct SlideModeView: View {
         .buttonStyle(.borderedProminent)
         .tint(tint)
         .disabled(isDisabled)
+    }
+
+    private var slideKeyboardShortcuts: some View {
+        Group {
+            Button("上一張") { manager.goToPreviousSlide() }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex == 0)
+            Button("上一張") { manager.goToPreviousSlide() }
+                .keyboardShortcut(.upArrow, modifiers: [])
+                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex == 0)
+            Button("下一張") { manager.goToNextSlide() }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1)
+            Button("下一張") { manager.goToNextSlide() }
+                .keyboardShortcut(.downArrow, modifiers: [])
+                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1)
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 
     private func slideRow(_ slide: SlideItem, index: Int) -> some View {
