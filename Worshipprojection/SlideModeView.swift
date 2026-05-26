@@ -194,6 +194,8 @@ struct SlideModeView: View {
                 ) {
                     manager.goToPreviousSlide()
                 }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .keyboardShortcut(.upArrow, modifiers: [])
 
                 slideActionButton(
                     title: manager.isSlideBlackout ? "恢復畫面" : "黑畫面",
@@ -211,6 +213,8 @@ struct SlideModeView: View {
                 ) {
                     manager.goToNextSlide()
                 }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .keyboardShortcut(.downArrow, modifiers: [])
             }
         }
     }
@@ -248,12 +252,16 @@ struct SlideModeView: View {
                 compactSlideActionButton(title: "上一張", icon: "chevron.left", isDisabled: manager.slideLibrary.isEmpty || manager.activeSlideIndex == 0) {
                     manager.goToPreviousSlide()
                 }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .keyboardShortcut(.upArrow, modifiers: [])
                 compactSlideActionButton(title: manager.isSlideBlackout ? "恢復" : "黑畫面", icon: manager.isSlideBlackout ? "eye" : "eye.slash", tint: manager.isSlideBlackout ? .green : .black, isDisabled: manager.slideLibrary.isEmpty) {
                     manager.isSlideBlackout.toggle()
                 }
                 compactSlideActionButton(title: "下一張", icon: "chevron.right", isDisabled: manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1) {
                     manager.goToNextSlide()
                 }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .keyboardShortcut(.downArrow, modifiers: [])
             }
         }
     }
