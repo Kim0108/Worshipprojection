@@ -23,6 +23,7 @@ struct SlideModeView: View {
                 ipadLayout
             }
         }
+        .background(slideKeyboardCommands)
         .background(Color(UIColor.systemBackground))
         .onAppear {
             manager.projectionMode = .slides
@@ -115,6 +116,20 @@ struct SlideModeView: View {
                 isReorderingSlides: $isReorderingSlides
             )
         }
+    }
+
+    private var slideKeyboardCommands: some View {
+        SlideKeyboardCommandBridge(
+            canGoPrevious: !manager.slideLibrary.isEmpty && manager.activeSlideIndex > 0,
+            canGoNext: !manager.slideLibrary.isEmpty && manager.activeSlideIndex < manager.slideLibrary.count - 1,
+            goPrevious: {
+                manager.goToPreviousSlide()
+            },
+            goNext: {
+                manager.goToNextSlide()
+            }
+        )
+        .accessibilityHidden(true)
     }
 
     private func handlePDFImportResult(_ result: Result<[URL], Error>) {

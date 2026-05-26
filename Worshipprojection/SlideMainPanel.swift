@@ -140,7 +140,6 @@ struct SlideMainPanel: View {
                 }
             }
 
-            slideKeyboardShortcuts
         }
     }
 
@@ -178,7 +177,6 @@ struct SlideMainPanel: View {
                 }
             }
 
-            slideKeyboardShortcuts
         }
     }
 
@@ -241,23 +239,4 @@ struct SlideMainPanel: View {
         .disabled(isDisabled)
     }
 
-    private var slideKeyboardShortcuts: some View {
-        Group {
-            Button("上一張") { manager.goToPreviousSlide() }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex == 0)
-            Button("上一張") { manager.goToPreviousSlide() }
-                .keyboardShortcut(.upArrow, modifiers: [])
-                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex == 0)
-            Button("下一張") { manager.goToNextSlide() }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1)
-            Button("下一張") { manager.goToNextSlide() }
-                .keyboardShortcut(.downArrow, modifiers: [])
-                .disabled(manager.slideLibrary.isEmpty || manager.activeSlideIndex >= manager.slideLibrary.count - 1)
-        }
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .accessibilityHidden(true)
-    }
 }
