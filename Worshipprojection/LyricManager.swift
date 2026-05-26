@@ -302,6 +302,13 @@ class LyricManager: ObservableObject {
         }
     }
 
+    func renameSlideFolder(_ folder: SlideFolder, to name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              let index = slideFolders.firstIndex(where: { $0.id == folder.id }) else { return }
+        slideFolders[index].name = trimmedName
+    }
+
     func importSlides(from items: [PhotosPickerItem]) async {
         for item in items {
             do {
@@ -417,6 +424,14 @@ class LyricManager: ObservableObject {
         }
         slideFolders[folderIndex].slides.remove(at: index)
         activeSlideIndex = min(activeSlideIndex, max(slideLibrary.count - 1, 0))
+    }
+
+    func renameSlide(_ slide: SlideItem, to name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              let folderIndex = activeSlideFolderIndex,
+              let index = slideFolders[folderIndex].slides.firstIndex(where: { $0.id == slide.id }) else { return }
+        slideFolders[folderIndex].slides[index].displayName = trimmedName
     }
 
     func deleteSlides(at offsets: IndexSet) {

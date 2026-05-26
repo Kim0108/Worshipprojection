@@ -9,6 +9,9 @@ struct SlideLibraryPanel: View {
     @Binding var showingNewFolderAlert: Bool
     @Binding var showingPDFImporter: Bool
     @Binding var isReorderingSlides: Bool
+    @State private var folderPendingRename: SlideFolder?
+    @State private var slidePendingRename: SlideItem?
+    @State private var renameText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -17,6 +20,40 @@ struct SlideLibraryPanel: View {
             folderStrip
             Divider()
             slideList
+        }
+        .alert("重新命名資料夾", isPresented: Binding(
+            get: { folderPendingRename != nil },
+            set: { if !$0 { folderPendingRename = nil } }
+        )) {
+            TextField("資料夾名稱", text: $renameText)
+            Button("儲存") {
+                if let folderPendingRename {
+                    manager.renameSlideFolder(folderPendingRename, to: renameText)
+                }
+                folderPendingRename = nil
+                renameText = ""
+            }
+            Button("取消", role: .cancel) {
+                folderPendingRename = nil
+                renameText = ""
+            }
+        }
+        .alert("重新命名投影片", isPresented: Binding(
+            get: { slidePendingRename != nil },
+            set: { if !$0 { slidePendingRename = nil } }
+        )) {
+            TextField("投影片名稱", text: $renameText)
+            Button("儲存") {
+                if let slidePendingRename {
+                    manager.renameSlide(slidePendingRename, to: renameText)
+                }
+                slidePendingRename = nil
+                renameText = ""
+            }
+            Button("取消", role: .cancel) {
+                slidePendingRename = nil
+                renameText = ""
+            }
         }
     }
 
@@ -80,6 +117,12 @@ struct SlideLibraryPanel: View {
                         .buttonStyle(.borderedProminent)
                         .tint(folder.id == manager.activeSlideFolder?.id ? .blue : .gray)
                         .contextMenu {
+                            Button {
+                                startRenaming(folder)
+                            } label: {
+                                Label("重新命名", systemImage: "pencil")
+                            }
+
                             Button(role: .destructive) {
                                 manager.deleteSlideFolder(folder)
                             } label: {
@@ -143,6 +186,12 @@ struct SlideLibraryPanel: View {
                 .frame(width: 4)
         }
         .contextMenu {
+            Button {
+                startRenaming(slide)
+            } label: {
+                Label("重新命名", systemImage: "pencil")
+            }
+
             Button(role: .destructive) {
                 manager.deleteSlide(slide)
             } label: {
@@ -150,6 +199,13 @@ struct SlideLibraryPanel: View {
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                startRenaming(slide)
+            } label: {
+                Label("重新命名", systemImage: "pencil")
+            }
+            .tint(.blue)
+
             Button(role: .destructive) {
                 manager.deleteSlide(slide)
             } label: {
@@ -163,6 +219,18 @@ struct SlideLibraryPanel: View {
                 Label("刪除", systemImage: "trash")
             }
         }
+    }
+
+    private func startRenaming(_ folder: SlideFolder) {
+        renameText = folder.name
+        slidePendingRename = nil
+        folderPendingRename = folder
+    }
+
+    private func startRenaming(_ slide: SlideItem) {
+        renameText = slide.displayName
+        folderPendingRename = nil
+        slidePendingRename = slide
     }
 
     private func slideThumbnail(_ slide: SlideItem) -> some View {
