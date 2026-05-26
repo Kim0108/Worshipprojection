@@ -14,6 +14,9 @@ struct SlideKeyboardCommandBridge: UIViewControllerRepresentable {
         controller.onNext = goNext
         controller.canGoPrevious = canGoPrevious
         controller.canGoNext = canGoNext
+        DispatchQueue.main.async {
+            controller.activateKeyboardCommandsIfAvailable()
+        }
         return controller
     }
 
@@ -22,9 +25,6 @@ struct SlideKeyboardCommandBridge: UIViewControllerRepresentable {
         controller.onNext = goNext
         controller.canGoPrevious = canGoPrevious
         controller.canGoNext = canGoNext
-        DispatchQueue.main.async {
-            controller.refreshFirstResponder()
-        }
     }
 }
 
@@ -38,37 +38,85 @@ final class KeyboardCommandViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        becomeFirstResponder()
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        if !isFirstResponder {
-            becomeFirstResponder()
-        }
+        activateKeyboardCommandsIfAvailable()
     }
 
     override var keyCommands: [UIKeyCommand]? {
         [
-            UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(previousSlide)),
-            UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(previousSlide)),
-            UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(nextSlide)),
-            UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(nextSlide))
+            keyCommand(input: UIKeyCommand.inputLeftArrow, action: #selector(previousSlide), title: "上一張"),
+            keyCommand(input: UIKeyCommand.inputUpArrow, action: #selector(previousSlide), title: "上一張"),
+            keyCommand(input: UIKeyCommand.inputRightArrow, action: #selector(nextSlide), title: "下一張"),
+            keyCommand(input: UIKeyCommand.inputDownArrow, action: #selector(nextSlide), title: "下一張")
         ]
     }
 
-    func refreshFirstResponder() {
-        guard view.window != nil, !isFirstResponder else { return }
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard !Self.textInputIsActive else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+
+        let handled = presses.contains { press in
+            switch press.type {
+            case .leftArrow, .upArrow:
+                previousSlide()
+                return true
+            case .rightArrow, .downArrow:
+                nextSlide()
+                return true
+            default:
+                return false
+            }
+        }
+
+        if !handled {
+            super.pressesBegan(presses, with: event)
+        }
+    }
+
+    func activateKeyboardCommandsIfAvailable() {
+        guard view.window != nil, !isFirstResponder, !Self.textInputIsActive else { return }
         becomeFirstResponder()
     }
 
+    private func keyCommand(input: String, action: Selector, title: String) -> UIKeyCommand {
+        let command = UIKeyCommand(input: input, modifierFlags: [], action: action, discoverabilityTitle: title)
+        command.wantsPriorityOverSystemBehavior = true
+        return command
+    }
+
     @objc private func previousSlide() {
+        guard !Self.textInputIsActive else { return }
         guard canGoPrevious else { return }
         onPrevious?()
     }
 
     @objc private func nextSlide() {
+        guard !Self.textInputIsActive else { return }
         guard canGoNext else { return }
         onNext?()
+    }
+
+    private static var textInputIsActive: Bool {
+        UIResponder.currentFirstResponder is any UITextInput
+    }
+}
+
+private extension UIResponder {
+    private weak static var discoveredFirstResponder: UIResponder?
+
+    static var currentFirstResponder: UIResponder? {
+        discoveredFirstResponder = nil
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.captureFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        return discoveredFirstResponder
+    }
+
+    @objc private func captureFirstResponder() {
+        UIResponder.discoveredFirstResponder = self
     }
 }
