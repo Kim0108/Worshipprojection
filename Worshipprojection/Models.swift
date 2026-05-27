@@ -126,7 +126,7 @@ struct TextSettings: Codable, Hashable {
     var fontSize: CGFloat = 80
     var textColor: ColorData = ColorData(r: 1, g: 1, b: 1)
     var shadowRadius: CGFloat = 10
-    var transitionDuration: Double = 0.5
+    var transitionDuration: Double = 0.12
     var lineSpacing: CGFloat = 20 // 1. 新增：預設行距 0423
     var horizontalAlignment: TextHorizontalAlignment = .center
     var verticalPosition: CGFloat = 0.5
@@ -145,7 +145,7 @@ struct TextSettings: Codable, Hashable {
         fontSize = try container.decodeIfPresent(CGFloat.self, forKey: .fontSize) ?? 80
         textColor = try container.decodeIfPresent(ColorData.self, forKey: .textColor) ?? ColorData(r: 1, g: 1, b: 1)
         shadowRadius = try container.decodeIfPresent(CGFloat.self, forKey: .shadowRadius) ?? 10
-        transitionDuration = try container.decodeIfPresent(Double.self, forKey: .transitionDuration) ?? 0.5
+        transitionDuration = try container.decodeIfPresent(Double.self, forKey: .transitionDuration) ?? 0.12
         lineSpacing = try container.decodeIfPresent(CGFloat.self, forKey: .lineSpacing) ?? 20
         horizontalAlignment = try container.decodeIfPresent(TextHorizontalAlignment.self, forKey: .horizontalAlignment) ?? .center
         verticalPosition = try container.decodeIfPresent(CGFloat.self, forKey: .verticalPosition) ?? 0.5
@@ -304,7 +304,7 @@ extension WorshipProjectPackage {
         var output: [String] = [
             "# WorshipProjection TXT v1",
             "# 每首歌用 ## Song: 開頭；段落使用 [主歌]、[副歌] 這類標籤。",
-            "# style: fontSize,lineSpacing,shadowRadius,horizontalPaddingRatio,textColorHex",
+            "# style: fontSize,lineSpacing,shadowRadius,transitionDuration,horizontalPaddingRatio,textColorHex",
             ""
         ]
 
@@ -313,6 +313,7 @@ extension WorshipProjectPackage {
             output.append("fontSize: \(Int(song.style.fontSize))")
             output.append("lineSpacing: \(Int(song.style.lineSpacing))")
             output.append("shadowRadius: \(Int(song.style.shadowRadius))")
+            output.append("transitionDuration: \(String(format: "%.2f", song.style.transitionDuration))")
             output.append("horizontalPaddingRatio: \(String(format: "%.2f", Double(song.style.horizontalPaddingRatio)))")
             output.append("textColor: \(song.style.textColor.hexString)")
             output.append("")
@@ -361,6 +362,8 @@ extension WorshipProjectPackage {
                     style.lineSpacing = CGFloat(Double(parts[1]) ?? Double(style.lineSpacing))
                 case "shadowRadius":
                     style.shadowRadius = CGFloat(Double(parts[1]) ?? Double(style.shadowRadius))
+                case "transitionDuration":
+                    style.transitionDuration = Double(parts[1]) ?? style.transitionDuration
                 case "horizontalPaddingRatio":
                     style.horizontalPaddingRatio = CGFloat(Double(parts[1]) ?? Double(style.horizontalPaddingRatio))
                 case "textColor":

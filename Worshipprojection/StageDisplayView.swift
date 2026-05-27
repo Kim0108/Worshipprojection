@@ -21,7 +21,7 @@ struct StageDisplayView: View {
                     .multilineTextAlignment(.center)
                     .lineSpacing(geo.size.height * (lyricManager.activeStyle.lineSpacing / 1000))
                     .padding(.horizontal, geo.size.width * lyricManager.activeStyle.horizontalPaddingRatio)
-                    .shadow(color: .black.opacity(0.8), radius: lyricManager.activeStyle.shadowRadius, x: 2, y: 2)
+                    .shadow(color: .black.opacity(0.5), radius: lyricManager.activeStyle.shadowRadius, x: 1, y: 1)
                     .minimumScaleFactor(0.3)
                     .id(lyricManager.activeLyricContent)
                     .frame(width: geo.size.width, height: geo.size.height, alignment: .center)

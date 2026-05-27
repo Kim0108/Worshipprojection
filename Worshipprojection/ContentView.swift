@@ -709,7 +709,7 @@ extension ContentView {
                     LazyVGrid(columns: lyricSegmentColumns, spacing: 10) {
                         ForEach(song.segments) { segment in
                             Button {
-                                withAnimation(.easeInOut(duration: 0.25)) {
+                                withAnimation(.easeInOut(duration: song.style.transitionDuration)) {
                                     manager.activeStyle = song.style
                                     manager.activeLyricContent = segment.content
                                 }
@@ -726,7 +726,7 @@ extension ContentView {
                             }
                         }
                         Button {
-                            withAnimation(.easeInOut(duration: 0.25)) { manager.activeLyricContent = "" }
+                            withAnimation(.easeInOut(duration: manager.activeStyle.transitionDuration)) { manager.activeLyricContent = "" }
                         } label: {
                             Text("清空文字")
                                 .frame(maxWidth: .infinity, minHeight: CGFloat(segmentCardHeight))

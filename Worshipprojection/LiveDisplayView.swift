@@ -50,8 +50,8 @@ struct LiveDisplayView: View {
                         .lineSpacing(geo.size.height * (manager.activeStyle.lineSpacing / 1000))
                         .padding(.horizontal, geo.size.width * manager.activeStyle.horizontalPaddingRatio) //
                         //.padding(.bottom, geo.size.height * 0.1)
-                        .shadow(color: .black.opacity(0.8), radius: manager.activeStyle.shadowRadius, x: 2, y: 2)
-                        .transition(.opacity)
+                        .shadow(color: .black.opacity(0.5), radius: manager.activeStyle.shadowRadius, x: 1, y: 1)
+                        .transition(.opacity.animation(.easeInOut(duration: manager.activeStyle.transitionDuration)))
                         // 修正 2：強迫 Text 填滿整個水平寬度，這樣 multilineTextAlignment 才會在寬空間中生效
                         .frame(maxWidth: .infinity, alignment: .center)
                 }

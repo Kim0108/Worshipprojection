@@ -14,6 +14,7 @@ struct SongEditorView: View {
     @State private var fontSize: Double = 80
     @State private var lineSpacing: Double = 20
     @State private var shadowRadius: Double = 10
+    @State private var transitionDuration: Double = 0.12
     @State private var verticalPosition: Double = 0.5
     @State private var horizontalPaddingRatio: Double = 0.05
     @State private var backgroundDimOpacity: Double = 0.0
@@ -78,7 +79,7 @@ struct SongEditorView: View {
                                 .multilineTextAlignment(horizontalAlignment.textAlignment)
                                 .lineSpacing(calcLineSpacing)
                                 .padding(.horizontal, paddingX)
-                                .shadow(color: .black.opacity(0.8), radius: shadowRadius, x: 2, y: 2)
+                                .shadow(color: .black.opacity(0.5), radius: shadowRadius, x: 1, y: 1)
                                 .frame(maxWidth: .infinity, alignment: horizontalAlignment.frameAlignment)
                         }
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
@@ -143,6 +144,14 @@ struct SongEditorView: View {
                     }
 
                     HStack {
+                        Text("切換速度")
+                        Slider(value: $transitionDuration, in: 0.05...0.8, step: 0.01)
+                        Text("\(String(format: "%.2f", transitionDuration)) 秒")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 64, alignment: .trailing)
+                    }
+
+                    HStack {
                         Text("背景壓暗")
                         Slider(value: $backgroundDimOpacity, in: 0...0.75, step: 0.05)
                         Text("\(Int(backgroundDimOpacity * 100))%")
@@ -178,6 +187,7 @@ struct SongEditorView: View {
             fontSize = Double(song.style.fontSize)
             lineSpacing = Double(song.style.lineSpacing)
             shadowRadius = Double(song.style.shadowRadius)
+            transitionDuration = song.style.transitionDuration
             verticalPosition = Double(song.style.verticalPosition)
             horizontalPaddingRatio = Double(song.style.horizontalPaddingRatio)
             backgroundDimOpacity = song.style.backgroundDimOpacity
@@ -206,6 +216,7 @@ struct SongEditorView: View {
             updated.style.fontSize = CGFloat(fontSize)
             updated.style.lineSpacing = CGFloat(lineSpacing)
             updated.style.shadowRadius = CGFloat(shadowRadius)
+            updated.style.transitionDuration = transitionDuration
             updated.style.verticalPosition = CGFloat(verticalPosition)
             updated.style.horizontalPaddingRatio = CGFloat(horizontalPaddingRatio)
             updated.style.backgroundDimOpacity = backgroundDimOpacity
@@ -219,6 +230,7 @@ struct SongEditorView: View {
                             fontSize: CGFloat(fontSize),
                             lineSpacing: CGFloat(lineSpacing),
                             shadowRadius: CGFloat(shadowRadius),
+                            transitionDuration: transitionDuration,
                             verticalPosition: CGFloat(verticalPosition),
                             horizontalPaddingRatio: CGFloat(horizontalPaddingRatio),
                             backgroundDimOpacity: backgroundDimOpacity,

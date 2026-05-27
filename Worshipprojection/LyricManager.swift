@@ -155,6 +155,7 @@ class LyricManager: ObservableObject {
         fontSize: CGFloat,
         lineSpacing: CGFloat,
         shadowRadius: CGFloat = 10,
+        transitionDuration: Double = 0.12,
         verticalPosition: CGFloat = 0.5,
         horizontalPaddingRatio: CGFloat = 0.05,
         backgroundDimOpacity: Double = 0.0,
@@ -168,6 +169,7 @@ class LyricManager: ObservableObject {
         newSong.style.fontSize = fontSize
         newSong.style.lineSpacing = lineSpacing // 存入行距
         newSong.style.shadowRadius = shadowRadius
+        newSong.style.transitionDuration = transitionDuration
         newSong.style.verticalPosition = verticalPosition
         newSong.style.horizontalPaddingRatio = horizontalPaddingRatio
         newSong.style.backgroundDimOpacity = backgroundDimOpacity
