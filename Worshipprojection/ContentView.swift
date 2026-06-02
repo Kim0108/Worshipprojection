@@ -133,6 +133,7 @@ extension ContentView {
                     Text("Live 控制台")
                         .font(.headline)
                     Spacer()
+                    replayBackgroundButton
                     layoutMenu
                     if let switchMode {
                         Button {
@@ -229,8 +230,11 @@ extension ContentView {
             // 右側 Live 區
             VStack(spacing: 0) {
                 HStack {
-                    Text("Live 控制台").font(.title2).foregroundColor(.red).bold()
+                    Text("Live 控制台")
+                        .font(.headline)
+                        .foregroundColor(.primary)
                     Spacer()
+                    replayBackgroundButton
                     layoutMenu
                     if let switchMode {
                         Button {
@@ -529,16 +533,26 @@ extension ContentView {
     private var livePreviewArea: some View {
         VStack {
             ScaledPreviewView(manager: manager, backgroundManager: backgroundManager) // 💡 替換成下方修正後的結構名稱
-                .cornerRadius(12)
-                .shadow(radius: 5)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.red.opacity(0.8), lineWidth: 2))
+                .cornerRadius(8)
+                .shadow(radius: 3)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.35), lineWidth: 1))
                 .padding()
             
-            Text("AirPlay 輸出畫面預覽").font(.headline).foregroundColor(.gray)
+            Text("AirPlay 輸出畫面預覽").font(.subheadline.weight(.semibold)).foregroundColor(.secondary)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.05))
+    }
+
+    private var replayBackgroundButton: some View {
+        Button {
+            backgroundManager.replaySelectedBackground()
+        } label: {
+            Label("重播背景", systemImage: "arrow.clockwise")
+        }
+        .buttonStyle(.bordered)
+        .disabled(backgroundManager.selectedBackground?.isVideo != true)
     }
 
     private var layoutMenu: some View {
@@ -703,7 +717,22 @@ extension ContentView {
 
     private var lyricSegmentsArea: some View {
         VStack(alignment: .leading) {
-            Text("當前歌曲段落選擇").font(.headline).padding([.horizontal, .top])
+            HStack {
+                Text("當前歌曲段落選擇")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: manager.activeStyle.transitionDuration)) {
+                        manager.activeLyricContent = ""
+                    }
+                } label: {
+                    Label("清空文字", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(manager.activeLyricContent.isEmpty)
+            }
+            .padding([.horizontal, .top])
+
             if let song = manager.selectedSong {
                 ScrollView {
                     LazyVGrid(columns: lyricSegmentColumns, spacing: 10) {
@@ -715,8 +744,12 @@ extension ContentView {
                                 }
                             } label: {
                                 VStack {
-                                    Text(segment.label).font(.system(size: 18, weight: .bold))
-                                    Text(segment.content).font(.system(size: 10)).lineLimit(1).opacity(0.7)
+                                    Text(segment.label)
+                                        .font(.system(size: 18, weight: .bold))
+                                    Text(segment.content)
+                                        .font(.system(size: 10))
+                                        .lineLimit(1)
+                                        .opacity(0.7)
                                 }
                                 .frame(maxWidth: .infinity, minHeight: CGFloat(segmentCardHeight))
                                 .background(manager.activeLyricContent == segment.content ? Color.orange : Color.blue)

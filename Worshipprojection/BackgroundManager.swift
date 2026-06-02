@@ -11,6 +11,7 @@ class BackgroundManager: ObservableObject {
     @Published var storageUsageString: String = "計算中..."
     @Published var memoryUsageString: String = "計算中..."
     @Published var previousBackground: BackgroundItem? = nil
+    @Published var backgroundReplayToken = 0
     @Published var selectedBackground: BackgroundItem? {
         didSet {
             if selectedBackground == nil {
@@ -19,6 +20,11 @@ class BackgroundManager: ObservableObject {
                 previousBackground = old
             }
         }
+    }
+
+    func replaySelectedBackground() {
+        guard selectedBackground?.isVideo == true else { return }
+        backgroundReplayToken += 1
     }
 
     private var memoryTimer: AnyCancellable?

@@ -5,6 +5,7 @@ internal import Combine
 
 struct BackgroundPlayerView: View {
     let item: BackgroundItem?
+    let replayToken: Int
 
     @State private var layerABackground: BackgroundItem?
     @State private var layerBBackground: BackgroundItem?
@@ -23,13 +24,13 @@ struct BackgroundPlayerView: View {
             Color.black.ignoresSafeArea()
 
             if let layerABackground {
-                BackgroundMediaView(item: layerABackground)
+                BackgroundMediaView(item: layerABackground, replayToken: replayToken)
                     .opacity(layerAOpacity)
                     .zIndex(0)
             }
 
             if let layerBBackground {
-                BackgroundMediaView(item: layerBBackground)
+                BackgroundMediaView(item: layerBBackground, replayToken: replayToken)
                     .opacity(layerBOpacity)
                     .zIndex(1)
             }
@@ -91,6 +92,7 @@ struct BackgroundPlayerView: View {
 
 private struct BackgroundMediaView: View {
     let item: BackgroundItem
+    let replayToken: Int
 
     @StateObject private var playerManager = BackgroundPlayerManager()
 
@@ -111,6 +113,12 @@ private struct BackgroundMediaView: View {
                             }
                             .onChange(of: item) { _, newItem in
                                 playerManager.setupPlayer(url: newItem.fileURL)
+                            }
+                            .onChange(of: replayToken) { _, _ in
+                                playerManager.restartCurrentVideo()
+                            }
+                            .onDisappear {
+                                playerManager.stop()
                             }
                 } else {
                         // 圖片顯示層
@@ -163,18 +171,30 @@ class PlayerUIView: UIView {
 class BackgroundPlayerManager: ObservableObject {
     @Published var player: AVQueuePlayer?
     private var playerLooper: AVPlayerLooper?
+    private var currentURL: URL?
+    private var recoveryAttempts = 0
+    private var healthTimer: AnyCancellable?
+    private var itemObservers: [NSObjectProtocol] = []
+    private var standbyPlayer: AVQueuePlayer?
+    private var standbyLooper: AVPlayerLooper?
+    private var standbyObservers: [NSObjectProtocol] = []
+    private var standbyStatusObserver: AnyCancellable?
+    private var hardReplayToken = 0
 
-    func setupPlayer(url: URL) {
+    func setupPlayer(url: URL, forceRestart: Bool = false) {
         // 檢查是否已經在播放同一個 URL，避免重複初始化
-        if let currentItem = player?.items().first,
+        if !forceRestart,
+           let currentItem = player?.items().first,
            (currentItem.asset as? AVURLAsset)?.url == url {
+            recoveryAttempts = 0
             player?.play()
+            startHealthCheck()
             return
         }
 
-        // 清理舊的播放器
-        player?.pause()
-        playerLooper = nil
+        cleanupPlayer()
+        currentURL = url
+        recoveryAttempts = 0
 
         // 建立循環播放器
         let playerItem = AVPlayerItem(url: url)
@@ -186,6 +206,240 @@ class BackgroundPlayerManager: ObservableObject {
         playerLooper = AVPlayerLooper(player: newQueuePlayer, templateItem: playerItem)
         
         self.player = newQueuePlayer
+        observe(item: playerItem)
+        startHealthCheck()
         newQueuePlayer.play()
+    }
+
+    func restartCurrentVideo() {
+        guard let currentURL else { return }
+        softReplayCurrentVideo(fallbackURL: currentURL)
+    }
+
+    func stop() {
+        cleanupPlayer()
+        currentURL = nil
+    }
+
+    private func recoverPlayback() {
+        guard let player else { return }
+
+        if recoveryAttempts == 0 {
+            recoveryAttempts += 1
+            player.play()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self,
+                      let player = self.player,
+                      player.rate == 0,
+                      player.currentItem?.status != .unknown else { return }
+                self.prepareHardReplay()
+            }
+        } else {
+            prepareHardReplay()
+        }
+    }
+
+    private func softReplayCurrentVideo(fallbackURL: URL) {
+        guard let player,
+              let item = player.currentItem,
+              item.status == .readyToPlay else {
+            prepareHardReplay(url: fallbackURL)
+            return
+        }
+
+        recoveryAttempts = 0
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if finished {
+                    player.play()
+                    self.startHealthCheck()
+                } else {
+                    self.prepareHardReplay(url: fallbackURL)
+                }
+            }
+        }
+    }
+
+    private func prepareHardReplay(url explicitURL: URL? = nil) {
+        guard let url = explicitURL ?? currentURL else { return }
+
+        hardReplayToken += 1
+        let currentToken = hardReplayToken
+        cleanupStandbyPlayer()
+
+        let playerItem = AVPlayerItem(url: url)
+        let newQueuePlayer = AVQueuePlayer(playerItem: playerItem)
+        newQueuePlayer.isMuted = true
+        newQueuePlayer.actionAtItemEnd = .none
+        let newLooper = AVPlayerLooper(player: newQueuePlayer, templateItem: playerItem)
+
+        standbyPlayer = newQueuePlayer
+        standbyLooper = newLooper
+        observeStandby(item: playerItem, token: currentToken)
+        newQueuePlayer.play()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self,
+                  self.hardReplayToken == currentToken,
+                  self.standbyPlayer === newQueuePlayer,
+                  playerItem.status == .readyToPlay else { return }
+            self.promoteStandbyPlayer(url: url)
+        }
+    }
+
+    private func startHealthCheck() {
+        healthTimer?.cancel()
+        healthTimer = Timer.publish(every: 3.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.checkPlaybackHealth()
+            }
+    }
+
+    private func checkPlaybackHealth() {
+        guard let player,
+              let item = player.currentItem else { return }
+
+        if item.status == .failed {
+            prepareHardReplay()
+            return
+        }
+
+        guard item.status == .readyToPlay else { return }
+
+        if player.timeControlStatus == .playing {
+            recoveryAttempts = 0
+            return
+        }
+
+        if player.rate == 0 {
+            recoverPlayback()
+        }
+    }
+
+    private func observe(item: AVPlayerItem) {
+        removeItemObservers()
+
+        let center = NotificationCenter.default
+        let stalled = center.addObserver(
+            forName: .AVPlayerItemPlaybackStalled,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            self?.recoverPlayback()
+        }
+
+        let failed = center.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            self?.prepareHardReplay()
+        }
+
+        itemObservers = [stalled, failed]
+    }
+
+    private func observeStandby(item: AVPlayerItem, token: Int) {
+        removeStandbyObservers()
+
+        let center = NotificationCenter.default
+        let failedObserver = center.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            self?.cleanupStandbyPlayer()
+        }
+
+        standbyObservers = [failedObserver]
+        standbyStatusObserver = item.publisher(for: \.status, options: [.new])
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                if status == .readyToPlay {
+                    self?.promoteStandbyIfReady(token: token)
+                } else if status == .failed {
+                    self?.cleanupStandbyPlayer()
+                }
+            }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.promoteStandbyIfReady(token: token)
+        }
+    }
+
+    private func promoteStandbyIfReady(token: Int) {
+        guard hardReplayToken == token,
+              let standbyPlayer,
+              let standbyItem = standbyPlayer.currentItem,
+              standbyItem.status == .readyToPlay else { return }
+        promoteStandbyPlayer(url: (standbyItem.asset as? AVURLAsset)?.url ?? currentURL)
+    }
+
+    private func promoteStandbyPlayer(url: URL?) {
+        guard let standbyPlayer,
+              let standbyLooper else { return }
+
+        let oldPlayer = player
+        let oldLooper = playerLooper
+        removeItemObservers()
+
+        playerLooper = standbyLooper
+        player = standbyPlayer
+        currentURL = url ?? currentURL
+        recoveryAttempts = 0
+
+        if let item = standbyPlayer.currentItem {
+            observe(item: item)
+        }
+        startHealthCheck()
+
+        self.standbyPlayer = nil
+        self.standbyLooper = nil
+        removeStandbyObservers()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            oldPlayer?.pause()
+            _ = oldLooper
+        }
+    }
+
+    private func removeItemObservers() {
+        for observer in itemObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        itemObservers.removeAll()
+    }
+
+    private func removeStandbyObservers() {
+        for observer in standbyObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        standbyObservers.removeAll()
+        standbyStatusObserver?.cancel()
+        standbyStatusObserver = nil
+    }
+
+    private func cleanupStandbyPlayer() {
+        removeStandbyObservers()
+        standbyPlayer?.pause()
+        standbyPlayer = nil
+        standbyLooper = nil
+    }
+
+    private func cleanupPlayer() {
+        healthTimer?.cancel()
+        healthTimer = nil
+        removeItemObservers()
+        cleanupStandbyPlayer()
+        player?.pause()
+        player = nil
+        playerLooper = nil
+    }
+
+    deinit {
+        stop()
     }
 }

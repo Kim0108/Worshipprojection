@@ -33,7 +33,10 @@ struct LiveDisplayView: View {
 
     private var lyricDisplay: some View {
         ZStack {
-            BackgroundPlayerView(item: backgroundManager.selectedBackground)
+            BackgroundPlayerView(
+                item: backgroundManager.selectedBackground,
+                replayToken: backgroundManager.backgroundReplayToken
+            )
                 .zIndex(0)
             
             // 4.1 修改後的頂層歌詞內容
