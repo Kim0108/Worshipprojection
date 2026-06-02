@@ -2,26 +2,18 @@ import SwiftUI
 import UIKit
 internal import Combine
 import PhotosUI
+import PDFKit
 internal import UniformTypeIdentifiers
 
 class LyricManager: ObservableObject {
     private var isReceivingFromNetwork = false
     @Published var appRole: AppRole?
     @Published var projectionMode: ProjectionMode = .lyricsWithBackground
-    
-// 💡 新增：儲存與內存的顯示字串
-    @Published var storageUsageString: String = "計算中..."
-    @Published var memoryUsageString: String = "計算中..."
-    private var memoryTimer: AnyCancellable? // 用來定時刷新內存
-    
-    // --- 1. 資料庫：歌詞與背景 ---
+
+    // --- 1. 資料庫：歌詞與投影片 ---
     @Published var allSongs: [Song] = [] {
         didSet { saveSongs() }
     }
-    @Published var backgroundFolders: [BackgroundFolder] = [] {
-        didSet { saveBackgrounds() }
-    }
-    @Published var activeBackgroundFolderID: UUID?
     @Published var slideFolders: [SlideFolder] = [] {
         didSet { saveSlides() }
     }
@@ -60,28 +52,9 @@ class LyricManager: ObservableObject {
                 }
             }
     }
-    
-    @Published var previousBackground: BackgroundItem? = nil
-    @Published var selectedBackground: BackgroundItem? {
-        didSet {
-            // 邏輯：當新背景被賦值時，把舊背景存到 previousBackground
-            if selectedBackground == nil {
-                previousBackground = nil
-            } else if let old = oldValue, old.id != selectedBackground?.id {
-                previousBackground = old
-            }
-        }
-    }
-    
     // --- 3. 儲存路徑 ---
     private var songsURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("songs_v2.json")
-    }
-    private var backgroundsURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("backgrounds_v2.json")
-    }
-    private var backgroundFoldersURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("background_folders_v1.json")
     }
     private var slidesURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("slides_v1.json")
@@ -102,12 +75,8 @@ class LyricManager: ObservableObject {
 
     init() {
         loadSongs()
-        loadBackgrounds()
         loadSlides()
         loadSetlist() // 載入今日流程
-        updateStorageUsage() // 💡 啟動時先算一次容量
-        startMemoryMonitoring()
-        clearTempDirectory()// 💡 加上這行：一打開 App 就把沒用的暫存全砍了
         // 在 LyricManager 的 init() 裡面：
         multipeerManager.onReceivedData = { [weak self] data in
             self?.receive(data)
@@ -167,111 +136,6 @@ class LyricManager: ObservableObject {
             activeLyricContent = receivedText
         }
     }
-// MARK: - 🗑️ 修正版：實體物理刪除背景
-    // 💡 同時刪除硬碟實體檔案、清空記憶體播放器、並從對應的資料夾陣列中移除
-    func deleteBackground(_ item: BackgroundItem, from folderID: UUID) {
-        // 1. 物理刪除硬碟檔案（避免 App 越來越大）
-        let fileURL = item.fileURL
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            do {
-                try FileManager.default.removeItem(at: fileURL)
-                print("🗑️ 成功從硬碟徹底刪除檔案：\(item.fileName)")
-            } catch {
-                print("❌ 物理刪除檔案失敗：\(error.localizedDescription)")
-            }
-        }
-        
-        // 2. 如果刪除的是當前畫面上正在播的背景，立刻清空它，釋放記憶體
-        if selectedBackground?.id == item.id {
-            selectedBackground = nil
-        }
-        if previousBackground?.id == item.id {
-            previousBackground = nil
-        }
-        
-        // 3. 從正確的資料夾中將它移除，並觸發 didSet 存檔
-        if let folderIndex = backgroundFolders.firstIndex(where: { $0.id == folderID }) {
-            backgroundFolders[folderIndex].backgrounds.removeAll(where: { $0.id == item.id })
-            // 重新賦值以觸發 @Published 的 didSet 存檔機制
-            backgroundFolders = backgroundFolders
-        }
-        
-        // 4. 刪除完畢，立刻重新計算硬碟大小
-        updateStorageUsage()
-        clearTempDirectory()
-    }
-
-    // MARK: - 📊 效能與內存監測工具
-    
-    /// 核心功能：計算沙盒 Documents 資料夾的總大小
-    func updateStorageUsage() {
-        let fileManager = FileManager.default
-        do {
-            let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: [.fileSizeKey], options: [])
-            var totalSize: Int64 = 0
-            for fileURL in fileURLs {
-                let resourceValues = try fileURL.resourceValues(forKeys: [.fileSizeKey])
-                if let fileSize = resourceValues.fileSize {
-                    totalSize += Int64(fileSize)
-                }
-            }
-            let formatter = ByteCountFormatter()
-            formatter.allowedUnits = [.useMB, .useGB]
-            formatter.countStyle = .file
-            
-            DispatchQueue.main.async {
-                self.storageUsageString = formatter.string(fromByteCount: totalSize)
-            }
-        } catch {
-            print("❌ 計算硬碟空間失敗: \(error)")
-        }
-    }
-    
-    /// 核心功能：每 2 秒抓取一次 iOS 系統分配給此 App 的真實執行內存 (RAM)
-    private func startMemoryMonitoring() {
-        memoryTimer = Timer.publish(every: 2.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.updateMemoryUsage()
-            }
-    }
-    
-    private func updateMemoryUsage() {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
-        
-        let kerr = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-            }
-        }
-        
-        if kerr == KERN_SUCCESS {
-            let usedBytes = Double(info.resident_size)
-            let usedMB = usedBytes / 1024.0 / 1024.0
-            DispatchQueue.main.async {
-                self.memoryUsageString = String(format: "%.1f MB", usedMB)
-            }
-        }
-    }
-    // 💡 3. 刪除「整個背景資料夾」時，一併刪除裡面的所有檔案
-    func deleteBackgroundFolder(at offsets: IndexSet) {
-        for index in offsets {
-            let folder = backgroundFolders[index]
-            // 迴圈把該資料夾內的所有背景檔案通通物理刪除
-            for bg in folder.backgrounds {
-                let fileURL = documentsDirectory.appendingPathComponent(bg.fileName)
-                try? FileManager.default.removeItem(at: fileURL)
-                print("🗑️ 已跟隨資料夾刪除檔案：\(bg.fileName)")
-            }
-        }
-        
-        // 從陣列中移除資料夾
-        backgroundFolders.remove(atOffsets: offsets)
-        
-        // 重新計算容量
-        updateStorageUsage()
-    }
     // MARK: - ⭐️ 今日流程管理邏輯
     func addToSetlist(_ song: Song) {
         synchronizeSongsBetweenLists()
@@ -291,6 +155,7 @@ class LyricManager: ObservableObject {
         fontSize: CGFloat,
         lineSpacing: CGFloat,
         shadowRadius: CGFloat = 10,
+        transitionDuration: Double = 0.12,
         verticalPosition: CGFloat = 0.5,
         horizontalPaddingRatio: CGFloat = 0.05,
         backgroundDimOpacity: Double = 0.0,
@@ -304,6 +169,7 @@ class LyricManager: ObservableObject {
         newSong.style.fontSize = fontSize
         newSong.style.lineSpacing = lineSpacing // 存入行距
         newSong.style.shadowRadius = shadowRadius
+        newSong.style.transitionDuration = transitionDuration
         newSong.style.verticalPosition = verticalPosition
         newSong.style.horizontalPaddingRatio = horizontalPaddingRatio
         newSong.style.backgroundDimOpacity = backgroundDimOpacity
@@ -361,209 +227,6 @@ class LyricManager: ObservableObject {
         allSongs.remove(atOffsets: offsets)
     }
 
-    // MARK: - 背景庫管理 (關鍵重構)
-
-    var activeBackgroundFolder: BackgroundFolder? {
-        guard let index = activeBackgroundFolderIndex else { return nil }
-        return backgroundFolders[index]
-    }
-
-    var backgroundLibrary: [BackgroundItem] {
-        activeBackgroundFolder?.backgrounds ?? []
-    }
-
-    var totalBackgroundCount: Int {
-        backgroundFolders.reduce(0) { $0 + $1.backgrounds.count }
-    }
-
-    private var activeBackgroundFolderIndex: Int? {
-        if let id = activeBackgroundFolderID,
-           let index = backgroundFolders.firstIndex(where: { $0.id == id }) {
-            return index
-        }
-        return backgroundFolders.indices.first
-    }
-
-    private func ensureBackgroundFolder() -> Int {
-        if let index = activeBackgroundFolderIndex {
-            if activeBackgroundFolderID == nil {
-                activeBackgroundFolderID = backgroundFolders[index].id
-            }
-            return index
-        }
-
-        let folder = BackgroundFolder(name: "預設背景")
-        backgroundFolders.append(folder)
-        activeBackgroundFolderID = folder.id
-        return 0
-    }
-
-    func createBackgroundFolder(named name: String) {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let folderName = trimmedName.isEmpty ? "新背景資料夾" : trimmedName
-        let folder = BackgroundFolder(name: folderName)
-        backgroundFolders.append(folder)
-        activeBackgroundFolderID = folder.id
-    }
-
-    func selectBackgroundFolder(_ folder: BackgroundFolder) {
-        guard backgroundFolders.contains(where: { $0.id == folder.id }) else { return }
-        activeBackgroundFolderID = folder.id
-    }
-
-    func deleteBackgroundFolder(_ folder: BackgroundFolder) {
-        guard let index = backgroundFolders.firstIndex(where: { $0.id == folder.id }) else { return }
-        for background in backgroundFolders[index].backgrounds {
-            let fileURL = documentsDirectory.appendingPathComponent(background.fileName)
-            if FileManager.default.fileExists(atPath: fileURL.path) {
-                try? FileManager.default.removeItem(at: fileURL)
-            }
-            if selectedBackground?.id == background.id {
-                selectedBackground = nil
-            }
-        }
-
-        backgroundFolders.remove(at: index)
-        if backgroundFolders.isEmpty {
-            activeBackgroundFolderID = nil
-        } else {
-            let nextIndex = min(index, backgroundFolders.count - 1)
-            activeBackgroundFolderID = backgroundFolders[nextIndex].id
-        }
-    }
-
-    func renameBackgroundFolder(_ folder: BackgroundFolder, to name: String) {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty,
-              let index = backgroundFolders.firstIndex(where: { $0.id == folder.id }) else { return }
-        backgroundFolders[index].name = trimmedName
-    }
-
-    func renameBackground(_ background: BackgroundItem, to name: String) {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return }
-
-        for folderIndex in backgroundFolders.indices {
-            if let backgroundIndex = backgroundFolders[folderIndex].backgrounds.firstIndex(where: { $0.id == background.id }) {
-                backgroundFolders[folderIndex].backgrounds[backgroundIndex].displayName = trimmedName
-                if selectedBackground?.id == background.id {
-                    selectedBackground = backgroundFolders[folderIndex].backgrounds[backgroundIndex]
-                }
-                return
-            }
-        }
-    }
-    
-    /// 從 PhotosPicker 匯入媒體到背景庫
-    // 修改後的匯入函式
-    func importBackground(from item: PhotosPickerItem, customName: String? = nil) async {
-        do {
-            let isVideo = item.supportedContentTypes.contains { type in
-                type.conforms(to: .movie) || type.conforms(to: .video) || type.conforms(to: .quickTimeMovie) || type.conforms(to: .mpeg4Movie)
-            }
-            
-            let fileName: String
-            // 1. 決定儲存在硬碟的實體檔名（建議維持 UUID 避免重複，只改顯示名稱）
-            let id = UUID().uuidString
-            
-            if isVideo {
-                guard let videoAsset = try await item.loadTransferable(type: VideoPickerTransferable.self) else { return }
-                fileName = "bg_video_\(id).\(videoAsset.url.pathExtension)"
-                let destination = documentsDirectory.appendingPathComponent(fileName)
-                try FileManager.default.copyItem(at: videoAsset.url, to: destination)
-            } else {
-                guard let data = try await item.loadTransferable(type: Data.self),
-                      let uiImage = UIImage(data: data),
-                      let jpegData = uiImage.jpegData(compressionQuality: 0.7) else { return }
-                
-                fileName = "bg_img_\(id).jpg"
-                let destination = documentsDirectory.appendingPathComponent(fileName)
-                try jpegData.write(to: destination)
-            }
-
-            await MainActor.run {
-                let folderIndex = self.ensureBackgroundFolder()
-                // 2. 決定要顯示在介面上的名字
-                // 如果 customName 有值就用它，否則用原本的邏輯
-                let display = (customName == nil || customName!.isEmpty) ?
-                              (isVideo ? "新影片背景" : "新圖片背景") : customName!
-                
-                let newBG = BackgroundItem(
-                    fileName: fileName,
-                    displayName: display,
-                    isVideo: isVideo
-                )
-                self.backgroundFolders[folderIndex].backgrounds.append(newBG)
-                self.selectedBackground = newBG
-                self.updateStorageUsage()
-                self.clearTempDirectory() // 💡 匯入完成後，立刻把 tmp 裡的過渡檔案刪除！
-            }
-        } catch {
-            print("❌ 匯入失敗: \(error.localizedDescription)")
-        }
-        
-    }
-    
-    func deleteBackground(at offsets: IndexSet) {
-        guard let folderIndex = activeBackgroundFolderIndex else { return }
-        for index in offsets {
-            let bg = backgroundFolders[folderIndex].backgrounds[index]
-            
-            // 1. 取得檔案在沙盒中的路徑
-            let fileURL = documentsDirectory.appendingPathComponent(bg.fileName)
-            
-            // 2. 物理刪除檔案（釋放 iPad 空間）
-            do {
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    try FileManager.default.removeItem(at: fileURL)
-                    print("🗑️ 已成功從硬碟刪除檔案：\(bg.fileName)")
-                }
-            } catch {
-                print("❌ 無法刪除實體檔案：\(error.localizedDescription)")
-            }
-            
-            // 3. 如果這個背景正在被 Live 使用，先清空它防止閃退
-            if selectedBackground?.id == bg.id {
-                selectedBackground = nil
-            }
-        }
-        
-        // 4. 從 UI 陣列中移除
-        backgroundFolders[folderIndex].backgrounds.remove(atOffsets: offsets)
-    }
-
-    func deleteAllBackgrounds() {
-        for folder in backgroundFolders {
-            for bg in folder.backgrounds {
-                let fileURL = documentsDirectory.appendingPathComponent(bg.fileName)
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    try? FileManager.default.removeItem(at: fileURL)
-                }
-            }
-        }
-        selectedBackground = nil
-        previousBackground = nil
-        backgroundFolders.removeAll()
-        activeBackgroundFolderID = nil
-        updateStorageUsage()
-        updateMemoryUsage()
-    }
-/// 💡 供 UI 按鈕直接呼叫的「一鍵清除與同步刷新」
-    func triggerAppSlimming() {
-        // 1. 執行物理刪除暫存垃圾
-        clearTempDirectory()
-        
-        // 2. 強制系統做一次記憶體垃圾回收（有助於降低 RAM 數字）
-        // iOS 沒有手動 GC，但我們可以透過清空沒用到的緩存間接釋放
-        if selectedBackground == nil {
-            // 如果當前沒播背景，通知系統釋放一些記憶體
-            URLCache.shared.removeAllCachedResponses()
-        }
-        
-        // 3. ⭐️ 關鍵：不等定時器，點擊的「當下」立刻強制計算最新數據
-        updateStorageUsage()
-        updateMemoryUsage()
-    }
     // MARK: - 投影片管理
 
     var activeSlideFolder: SlideFolder? {
@@ -641,6 +304,13 @@ class LyricManager: ObservableObject {
         }
     }
 
+    func renameSlideFolder(_ folder: SlideFolder, to name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              let index = slideFolders.firstIndex(where: { $0.id == folder.id }) else { return }
+        slideFolders[index].name = trimmedName
+    }
+
     func importSlides(from items: [PhotosPickerItem]) async {
         for item in items {
             do {
@@ -671,6 +341,64 @@ class LyricManager: ObservableObject {
         }
     }
 
+    func importPDFSlides(from url: URL) async throws {
+        let data = try Data(contentsOf: url)
+        guard let document = PDFDocument(data: data) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let baseName = url.deletingPathExtension().lastPathComponent
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex),
+                  let jpegData = renderPDFPageAsJPEG(page) else { continue }
+
+            let id = UUID().uuidString
+            let fileName = "slide_pdf_\(id).jpg"
+            let destination = documentsDirectory.appendingPathComponent(fileName)
+            try jpegData.write(to: destination)
+
+            await MainActor.run {
+                let folderIndex = self.ensureSlideFolder()
+                let slide = SlideItem(
+                    fileName: fileName,
+                    displayName: "\(baseName) \(pageIndex + 1)"
+                )
+                self.slideFolders[folderIndex].slides.append(slide)
+                if self.slideFolders[folderIndex].slides.count == 1 {
+                    self.activeSlideIndex = 0
+                }
+                self.isSlideBlackout = false
+            }
+        }
+    }
+
+    private func renderPDFPageAsJPEG(_ page: PDFPage) -> Data? {
+        let pageBounds = page.bounds(for: .mediaBox)
+        guard pageBounds.width > 0, pageBounds.height > 0 else { return nil }
+
+        let maxPixelSide: CGFloat = 1920
+        let scale = min(maxPixelSide / max(pageBounds.width, pageBounds.height), 3.0)
+        let targetSize = CGSize(width: pageBounds.width * scale, height: pageBounds.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        let image = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: targetSize))
+
+            let cgContext = context.cgContext
+            cgContext.saveGState()
+            cgContext.translateBy(x: 0, y: targetSize.height)
+            cgContext.scaleBy(x: scale, y: -scale)
+            cgContext.translateBy(x: -pageBounds.minX, y: -pageBounds.minY)
+            page.draw(with: .mediaBox, to: cgContext)
+            cgContext.restoreGState()
+        }
+
+        return image.jpegData(compressionQuality: 0.9)
+    }
+
     func selectSlide(_ slide: SlideItem) {
         guard let index = slideLibrary.firstIndex(where: { $0.id == slide.id }) else { return }
         activeSlideIndex = index
@@ -698,6 +426,14 @@ class LyricManager: ObservableObject {
         }
         slideFolders[folderIndex].slides.remove(at: index)
         activeSlideIndex = min(activeSlideIndex, max(slideLibrary.count - 1, 0))
+    }
+
+    func renameSlide(_ slide: SlideItem, to name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              let folderIndex = activeSlideFolderIndex,
+              let index = slideFolders[folderIndex].slides.firstIndex(where: { $0.id == slide.id }) else { return }
+        slideFolders[folderIndex].slides[index].displayName = trimmedName
     }
 
     func deleteSlides(at offsets: IndexSet) {
@@ -878,28 +614,6 @@ class LyricManager: ObservableObject {
         todaySetlist = decoded
     }
 
-    private func saveBackgrounds() {
-        do {
-            let data = try JSONEncoder().encode(backgroundFolders)
-            try data.write(to: backgroundFoldersURL)
-        } catch { print("❌ 背景庫存檔失敗: \(error)") }
-    }
-
-    private func loadBackgrounds() {
-        if let data = try? Data(contentsOf: backgroundFoldersURL),
-           let decoded = try? JSONDecoder().decode([BackgroundFolder].self, from: data) {
-            backgroundFolders = decoded
-            activeBackgroundFolderID = decoded.first?.id
-            return
-        }
-
-        guard let data = try? Data(contentsOf: backgroundsURL) else { return }
-        if let legacyBackgrounds = try? JSONDecoder().decode([BackgroundItem].self, from: data) {
-            backgroundFolders = [BackgroundFolder(name: "預設背景", backgrounds: legacyBackgrounds)]
-            activeBackgroundFolderID = backgroundFolders.first?.id
-        }
-    }
-
     private func saveSlides() {
         do {
             let data = try JSONEncoder().encode(slideFolders)
@@ -919,19 +633,6 @@ class LyricManager: ObservableObject {
         if let legacySlides = try? JSONDecoder().decode([SlideItem].self, from: data) {
             slideFolders = [SlideFolder(name: "預設簡報", slides: legacySlides)]
             activeSlideFolderID = slideFolders.first?.id
-        }
-    }
-// MARK: - 🧹 系統深度清理 (清除幽靈暫存檔)
-    func clearTempDirectory() {
-        let tempDirectory = FileManager.default.temporaryDirectory
-        do {
-            let tempFiles = try FileManager.default.contentsOfDirectory(at: tempDirectory, includingPropertiesForKeys: nil, options: [])
-            for file in tempFiles {
-                try FileManager.default.removeItem(at: file)
-                print("🧹 成功清除殘留暫存檔：\(file.lastPathComponent)")
-            }
-        } catch {
-            print("❌ 清除暫存檔失敗：\(error)")
         }
     }
 }
